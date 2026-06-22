@@ -191,6 +191,7 @@ User → Planner → Retriever → Coder → Tester → Coder → Tester
 │   ├── documents/             # 上传的知识文档（PDF/TXT）
 │   └── chroma_db/             # 向量数据库持久化目录
 │
+├── .env                       # 环境变量（API Key，不提交 Git）
 ├── coding/                    # 代码执行工作目录
 ├── reports/                   # 生成报告输出目录
 └── requirements.txt           # 依赖清单
@@ -210,6 +211,7 @@ User → Planner → Retriever → Coder → Tester → Coder → Tester
 | `app/components.py` | `render_thinking_card` | 思考卡片组件 |
 | `app/knowledge.py` | `render_knowledge_sidebar` | 侧边栏知识库 UI |
 | `rag/knowledge_base.py` | `build_index` / `search` / `get_stats` | ChromaDB CRUD |
+| `.env` | — | API Key 等环境变量（已 `.gitignore`，不提交） |
 
 ---
 
@@ -221,9 +223,18 @@ User → Planner → Retriever → Coder → Tester → Coder → Tester
 |------|------|---------|
 | Python | 3.11+ | `python --version` |
 | Ollama | 运行中 + qwen2.5:7b（可选） | `ollama list` |
-| API Key | `DEEPSEEK_API_KEY`（或你用的 API） | `echo %DEEPSEEK_API_KEY%` |
+| API Key | `DEEPSEEK_API_KEY` | 项目根目录新建 `.env`：`DEEPSEEK_API_KEY=sk-xxx` |
 
-### 5.2 配置模型（只需改一个文件）
+### 5.2 配置 API Key
+
+项目通过 `.env` 文件管理 API Key（已加入 `.gitignore`，不提交 Git）。
+首次使用在项目根目录创建 `.env`：
+
+```
+DEEPSEEK_API_KEY=sk-你的key
+```
+
+### 5.3 配置模型（只需改一个文件）
 
 编辑 `config.py`：
 
@@ -453,8 +464,12 @@ pip install -r requirements.txt
 ollama pull qwen2.5:7b
 
 # 3. 设置 DeepSeek API Key（必需）
-#    Windows: set DEEPSEEK_API_KEY=sk-xxx
-#    macOS/Linux: export DEEPSEEK_API_KEY=sk-xxx
+#    方式一（推荐）：项目根目录创建 .env 文件，写入：
+#       DEEPSEEK_API_KEY=sk-你的key
+#    方式二（环境变量）：
+#       Windows: set DEEPSEEK_API_KEY=sk-xxx
+#       macOS/Linux: export DEEPSEEK_API_KEY=sk-xxx
+#    注意：方式一需依赖 python-dotenv（已在 requirements.txt 中声明 >=1.0）
 ```
 
 ### 9.2 首次运行

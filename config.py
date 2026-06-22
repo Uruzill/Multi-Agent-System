@@ -25,6 +25,8 @@ LLM 配置。
 """
 
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
 # ===== 模型池 =====
 # 在这里添加你的所有模型，格式：

@@ -10,6 +10,10 @@ _test_*.py
 
 # === 输出产物（可重新运行生成） ===
 **/reports/
+**/chroma_db/
+
+# === 环境变量 ===
+.env
 
 # === IDE ===
 .vscode/
