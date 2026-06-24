@@ -22,6 +22,8 @@ document.addEventListener("DOMContentLoaded", () => {
     setupLaneMode();
     setupChatForm();
     setupKnowledgeUI();
+    setupFileUpload();
+    setupDragUpload();
     // 如果已登录，加载会话历史
     const uid = getUserId();
     if (uid && typeof loadSessionHistory === 'function') {
@@ -53,7 +55,19 @@ function setupLaneMode() {
         });
     };
     document.querySelectorAll("input[name='lane_mode']").forEach(r => {
-        r.addEventListener('change', updateStatus);
+        r.addEventListener('change', function() {
+            updateStatus();
+            // 同步欢迎页模式高亮
+            var val = this.value;
+            var label = document.getElementById('welcome-mode-label');
+            if (label) {
+                var names = { auto: '自动', fast: '快速', slow: '协作' };
+                label.innerHTML = '使用 <strong>' + (names[val] || val) + '</strong> 模式进行对话';
+            }
+            document.querySelectorAll('.welcome-mode').forEach(function(m) {
+                m.classList.toggle('active', m.getAttribute('data-value') === val);
+            });
+        });
     });
     updateStatus();
 }
@@ -113,6 +127,14 @@ function setupChatForm() {
 async function sendMessage(message) {
     const laneMode = document.querySelector("input[name='lane_mode']:checked")?.value || "auto";
 
+    // 首次发送时取消整体居中 + 移除引导页
+    var layout = document.getElementById('chat-layout');
+    if (layout && layout.classList.contains('welcome-active')) {
+        layout.classList.remove('welcome-active');
+    }
+    var welcome = document.querySelector('.chat-welcome');
+    if (welcome) welcome.remove();
+
     appendUserMessage(message);
 
     const loadingId = appendLoadingMessage();
@@ -122,18 +144,24 @@ async function sendMessage(message) {
         let modelConfig = {};
         try { modelConfig = JSON.parse(localStorage.getItem("mc_roles") || "{}"); } catch(e) {}
 
+        var body = {
+            message: message,
+            lane_mode: laneMode,
+            history: messageHistory,
+            model_config: modelConfig,
+        };
+        if (pendingFiles.length > 0) {
+            body.file_ids = pendingFiles.slice();
+        }
+
         const resp = await fetch("/api/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                message: message,
-                lane_mode: laneMode,
-                history: messageHistory,
-                model_config: modelConfig,
-            }),
+            body: JSON.stringify(body),
         });
 
         removeLoadingMessage(loadingId);
+        clearFileTags();
 
         if (!resp.ok) {
             const errData = await resp.json().catch(() => ({}));
@@ -203,23 +231,26 @@ function appendAssistantMessage(data) {
             '</div>';
     }
 
-    // Report 按钮（非闲聊时显示）
-    let reportHtml = "";
+    // 操作工具栏（复制 / 重新生成 / 报告）
+    let toolbarHtml = `<div class="msg-toolbar">`;
+    toolbarHtml += `<button class="toolbar-btn" onclick="copyReply(this)" data-text="${escapeAttr(data.reply)}" title="复制回复">复制</button>`;
+    toolbarHtml += `<button class="toolbar-btn" onclick="regenerate()" title="重新回答">重新回答</button>`;
     if (data.thinking && data.thinking.length > 0 && data.task_type && data.task_type !== "闲聊" && data.task_type !== "问答") {
-        reportHtml = `<button class="btn btn-sm btn-outline-secondary mt-2 report-btn">📥 生成详细报告</button>`;
+        toolbarHtml += `<button class="toolbar-btn report-btn" title="生成报告">生成报告</button>`;
     }
+    toolbarHtml += `</div>`;
 
     div.innerHTML = `
         ${thinkingHtml}
                 <div class="bubble">${markdownToHtml(data.reply)}</div>
         ${filesHtml}
-        ${reportHtml}
+        ${toolbarHtml}
     `;
 
     // 绑定报告按钮
     div.querySelector(".report-btn")?.addEventListener("click", async function () {
         this.disabled = true;
-        this.textContent = "生成中...";
+            this.textContent = "生成中...";
         try {
             const resp = await fetch("/api/report", {
                 method: "POST",
@@ -232,13 +263,80 @@ function appendAssistantMessage(data) {
             reportDiv.innerHTML = `<strong>📊 详细报告</strong><hr>${markdownToHtml(report.content)}`;
             this.replaceWith(reportDiv);
         } catch {
-            this.textContent = "生成失败，重试";
+            this.textContent = "报告";
             this.disabled = false;
         }
     });
 
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;
+}
+
+// ===== 复制回复 =====
+function copyReply(btn) {
+    const text = btn.getAttribute("data-text");
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+        const orig = btn.textContent;
+        btn.textContent = "✅ 已复制";
+        setTimeout(() => { btn.textContent = orig; }, 2000);
+    }).catch(() => {
+        btn.textContent = "复制失败";
+        setTimeout(() => { btn.textContent = "复制"; }, 2000);
+    });
+}
+
+// ===== 重新生成 =====
+function regenerate() {
+    // 找到最后一条用户消息
+    let lastUserMsg = null;
+    for (let i = messageHistory.length - 1; i >= 0; i--) {
+        if (messageHistory[i].role === "user") {
+            lastUserMsg = messageHistory[i].content;
+            break;
+        }
+    }
+    if (!lastUserMsg) return;
+
+    // 移除最后一条助手回复（DOM）
+    const msgs = document.querySelectorAll("#chat-messages .message-assistant");
+    const last = msgs[msgs.length - 1];
+    if (last) last.remove();
+    // 从 history 弹出最后一条 assistant 记录
+    if (messageHistory.length > 0 && messageHistory[messageHistory.length - 1].role === "assistant") {
+        messageHistory.pop();
+    }
+
+    const laneMode = document.querySelector("input[name='lane_mode']:checked")?.value || "auto";
+    const loadingId = appendLoadingMessage();
+
+    let modelConfig = {};
+    try { modelConfig = JSON.parse(localStorage.getItem("mc_roles") || "{}"); } catch(e) {}
+
+    fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            message: lastUserMsg,
+            lane_mode: laneMode,
+            history: messageHistory,
+            model_config: modelConfig,
+        }),
+    })
+    .then(resp => {
+        removeLoadingMessage(loadingId);
+        if (!resp.ok) throw new Error(`服务器错误 (${resp.status})`);
+        return resp.json();
+    })
+    .then(data => {
+        appendAssistantMessage(data);
+        messageHistory.push({ role: "assistant", content: data.reply });
+        saveCurrentSession();
+    })
+    .catch(err => {
+        removeLoadingMessage(loadingId);
+        appendErrorMessage(err.message);
+    });
 }
 
 function renderAgentCard(msg) {
@@ -277,7 +375,12 @@ function appendLoadingMessage() {
     const div = document.createElement("div");
     div.id = id;
     div.className = "message-assistant";
-    div.innerHTML = '<div class="bubble loading-bubble">思考中<span class="loading-dots"></span></div>';
+    div.innerHTML = `
+        <div class="skeleton-bubble">
+            <div class="skeleton-line w-60"></div>
+            <div class="skeleton-line w-80"></div>
+            <div class="skeleton-line w-45"></div>
+        </div>`;
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;
     return id;
@@ -286,6 +389,117 @@ function appendLoadingMessage() {
 function removeLoadingMessage(id) {
     const el = document.getElementById(id);
     if (el) el.remove();
+}
+
+// ===== 文件上传 =====
+let pendingFiles = [];
+
+function setupFileUpload() {
+    var btn = document.getElementById('attach-btn');
+    var input = document.getElementById('file-input');
+    if (!btn || !input) return;
+
+    btn.addEventListener('click', function() { input.click(); });
+
+    input.addEventListener('change', async function() {
+        var files = Array.from(this.files);
+        if (!files.length) return;
+        this.value = '';
+        for (var f of files) {
+            await uploadFile(f);
+        }
+    });
+}
+
+async function uploadFile(file) {
+    var tagId = 'ft-' + Date.now();
+    addFileTag(tagId, file.name, '上传中...');
+
+    var formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        var resp = await fetch('/api/upload', { method: 'POST', body: formData });
+        if (!resp.ok) {
+            var err = await resp.json().catch(function() { return { error: '上传失败' }; });
+            updateFileTag(tagId, file.name, '❌ ' + (err.error || '失败'), true);
+            return;
+        }
+        var data = await resp.json();
+        updateFileTag(tagId, file.name, '✅ ' + file.name, false);
+        pendingFiles.push(data.file_id);
+    } catch (e) {
+        updateFileTag(tagId, file.name, '❌ 网络错误', true);
+    }
+}
+
+function addFileTag(id, name, status) {
+    var el = document.getElementById('file-tags');
+    if (!el) return;
+    var tag = document.createElement('span');
+    tag.id = id;
+    tag.className = 'file-tag';
+    tag.innerHTML = '<span class="ft-name">' + escapeHtml(name) + '</span> <span class="ft-status">' + escapeHtml(status) + '</span>';
+    el.appendChild(tag);
+}
+
+function updateFileTag(id, name, status, isError) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = '<span class="ft-name">' + escapeHtml(name) + '</span> <span class="ft-status">' + escapeHtml(status) + '</span>';
+    if (isError) {
+        el.classList.add('ft-error');
+        setTimeout(function() { el.remove(); }, 4000);
+    }
+}
+
+// ===== 拖拽上传 =====
+function setupDragUpload() {
+    var zone = document.getElementById('drop-zone');
+    var overlay = document.getElementById('drag-overlay');
+    if (!zone || !overlay) return;
+
+    var dragCount = 0;
+
+    zone.addEventListener('dragenter', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dragCount++;
+        overlay.classList.add('show');
+    });
+
+    zone.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    });
+
+    zone.addEventListener('dragleave', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dragCount--;
+        if (dragCount <= 0) {
+            dragCount = 0;
+            overlay.classList.remove('show');
+        }
+    });
+
+    zone.addEventListener('drop', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dragCount = 0;
+        overlay.classList.remove('show');
+        var files = Array.from(e.dataTransfer.files);
+        if (!files.length) return;
+        for (var f of files) {
+            uploadFile(f);
+        }
+    });
+}
+
+function clearFileTags() {
+    pendingFiles = [];
+    var el = document.getElementById('file-tags');
+    if (el) el.innerHTML = '';
 }
 
 // ===== 知识库 UI =====
@@ -355,6 +569,10 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function escapeAttr(str) {
+    return str.replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 // ===== Markdown → HTML（代码块带复制按钮 + 语言标签） =====
 function markdownToHtml(md) {
     let html = escapeHtml(md);
@@ -412,4 +630,5 @@ window.newChat = function() {
     if (_origNewChat) _origNewChat();
     messageHistory = [];
     _currentSessionId = null;
+    clearFileTags();
 };

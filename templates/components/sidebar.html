@@ -195,9 +195,29 @@ function newChat() {
     document.getElementById("chat-messages").innerHTML = `
         <div class="chat-welcome">
             <h2 class="chat-welcome-title">多智能体协作系统</h2>
-            <p class="chat-welcome-sub">输入任务开始对话 · 支持编程 / 写作 / 分析 / 问答 / 闲聊</p>
+            <p class="chat-welcome-sub" id="welcome-mode-label">使用 <strong>自动</strong> 模式进行对话</p>
+            <div class="welcome-modes">
+                <div class="welcome-mode active" data-value="auto" onclick="selectWelcomeMode(this)">
+                    <div class="welcome-mode-icon">⚡</div>
+                    <div class="welcome-mode-name">自动</div>
+                    <div class="welcome-mode-desc">AI 判断任务复杂度</div>
+                </div>
+                <div class="welcome-mode" data-value="fast" onclick="selectWelcomeMode(this)">
+                    <div class="welcome-mode-icon">💬</div>
+                    <div class="welcome-mode-name">快速</div>
+                    <div class="welcome-mode-desc">直接回复，无需协作</div>
+                </div>
+                <div class="welcome-mode" data-value="slow" onclick="selectWelcomeMode(this)">
+                    <div class="welcome-mode-icon">🤖</div>
+                    <div class="welcome-mode-name">协作</div>
+                    <div class="welcome-mode-desc">多智能体流水线</div>
+                </div>
+            </div>
         </div>
     `;
+    // 恢复整体居中
+    var layout = document.getElementById('chat-layout');
+    if (layout) layout.classList.add('welcome-active');
     // 重置会话变量（chat.js 中定义）
     if (typeof messageHistory !== 'undefined') messageHistory = [];
     if (typeof _currentSessionId !== 'undefined') _currentSessionId = null;
