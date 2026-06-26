@@ -15,6 +15,8 @@ const COLORS = {
 
 let messageHistory = [];
 let _currentSessionId = null;
+let _streamSessionId = null;   // 当前活跃的流式会话 ID，用于中断
+let _streamReader = null;      // 当前活跃的 ReadableStream reader，用于中断
 
 // ===== 鉴权工具 =====
 function getAuthHeaders() {
@@ -89,6 +91,34 @@ function toggleThinkingPanel(id, btn) {
     }
 }
 
+// ===== 中断流式请求 =====
+async function abortStream() {
+    // 关闭 reader
+    if (_streamReader) {
+        try { _streamReader.cancel(); } catch(e) {}
+        _streamReader = null;
+    }
+    // 通知后端
+    if (_streamSessionId) {
+        try {
+            await fetch("/api/chat/cancel/" + _streamSessionId, { method: "POST" });
+        } catch(e) {}
+        _streamSessionId = null;
+    }
+    // 移除骨架屏
+    document.querySelectorAll('.message-assistant .bubble:empty').forEach(function(el) {
+        var parent = el.closest('.message-assistant');
+        if (parent) {
+            var bubble = parent.querySelector('.bubble');
+            if (bubble && !bubble.textContent.trim()) {
+                bubble.textContent = '已中断';
+                bubble.style.color = 'var(--text-secondary)';
+                bubble.style.fontStyle = 'italic';
+            }
+        }
+    });
+}
+
 // ===== 聊天表单 =====
 function setupChatForm() {
     const form = document.getElementById("chat-form");
@@ -99,6 +129,11 @@ function setupChatForm() {
     input.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
+            // 流式进行中 → 中断
+            if (_streamSessionId) {
+                abortStream();
+                return;
+            }
             const message = input.value.trim();
             if (!message) return;
             sendMessage(message);
@@ -106,8 +141,20 @@ function setupChatForm() {
         }
     });
 
+    // 全局 Esc 中断
+    document.addEventListener("keydown", function(e) {
+        if (e.key === "Escape" && _streamSessionId) {
+            abortStream();
+        }
+    });
+
     form.addEventListener("submit", async (e) => {
         e.preventDefault();
+        // 流式进行中 → 中断
+        if (_streamSessionId) {
+            abortStream();
+            return;
+        }
         const message = input.value.trim();
         if (!message) return;
         await sendMessage(message);
@@ -115,45 +162,101 @@ function setupChatForm() {
     });
 }
 
-// ===== 发送消息 =====
+// ===== 发送消息（流式：start → SSE → done） =====
 async function sendMessage(message) {
     const laneMode = document.querySelector("input[name='lane_mode']:checked")?.value || "auto";
+
+    // 首次发送时取消整体居中 + 移除引导页
+    var layout = document.getElementById('chat-layout');
+    if (layout && layout.classList.contains('welcome-active')) {
+        layout.classList.remove('welcome-active');
+    }
+    var welcome = document.querySelector('.chat-welcome');
+    if (welcome) welcome.remove();
 
     appendUserMessage(message);
 
     const loadingId = appendLoadingMessage();
 
-    try {
-        // 读取当前模型配置
-        let modelConfig = {};
-        try { modelConfig = JSON.parse(localStorage.getItem("mc_roles") || "{}"); } catch(e) {}
+    // 中断上一次仍活跃的流
+    await abortStream();
 
-        const resp = await fetch("/api/chat", {
+    try {
+        // 1. 启动工作流，获取 session_id
+        const startResp = await fetch("/api/chat/start", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 message: message,
                 lane_mode: laneMode,
                 history: messageHistory,
-                model_config: modelConfig,
             }),
         });
+        if (!startResp.ok) {
+            const errData = await startResp.json().catch(() => ({}));
+            throw new Error(errData.error || `启动失败 (${startResp.status})`);
+        }
+        const { session_id } = await startResp.json();
+        _streamSessionId = session_id;
 
+        // 2. 移除骨架屏，创建实时助手消息容器
         removeLoadingMessage(loadingId);
+        const assistantDiv = createAssistantSkeleton(session_id);
+        assistantDiv.dataset.laneMode = laneMode;
 
-        if (!resp.ok) {
-            const errData = await resp.json().catch(() => ({}));
-            throw new Error(errData.error || errData.reply || `服务器错误 (${resp.status})`);
+        // 3. 连接 SSE（fetch + ReadableStream，支持中断和未来鉴权）
+        const ctrl = new AbortController();
+        const streamResp = await fetch("/api/chat/stream/" + session_id, {
+            signal: ctrl.signal,
+        });
+        if (!streamResp.ok) throw new Error("流式连接失败");
+
+        const reader = streamResp.body.getReader();
+        _streamReader = reader;
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            // 按 SSE 标准分割：data: {...}\n\n
+            var parts = buffer.split("\n\n");
+            buffer = parts.pop() || "";
+
+            for (var i = 0; i < parts.length; i++) {
+                var part = parts[i];
+                var dataLine = "";
+                var lines2 = part.split("\n");
+                for (var j = 0; j < lines2.length; j++) {
+                    var l = lines2[j];
+                    if (l.startsWith("data: ")) {
+                        dataLine = l.slice(6);
+                        break;
+                    }
+                }
+                if (!dataLine) continue;
+                try {
+                    var event = JSON.parse(dataLine);
+                    handleStreamEvent(assistantDiv, event);
+                } catch (e) {
+                    console.warn("SSE 解析错误:", e);
+                }
+            }
         }
 
-        const data = await resp.json();
-        appendAssistantMessage(data);
+        // 4. 流结束
+        _streamReader = null;
+        _streamSessionId = null;
         messageHistory.push({ role: "user", content: message });
-        messageHistory.push({ role: "assistant", content: data.reply });
-        // 自动保存会话
         saveCurrentSession();
+
     } catch (err) {
         removeLoadingMessage(loadingId);
+        _streamReader = null;
+        _streamSessionId = null;
+        if (err.name === 'AbortError') return;
         appendErrorMessage(err.message);
     }
 }
@@ -245,6 +348,128 @@ function appendAssistantMessage(data) {
 
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;
+}
+
+// ===== 流式 SSE 辅助函数 =====
+
+function createAssistantSkeleton(sessionId) {
+    const container = document.getElementById("chat-messages");
+    const div = document.createElement("div");
+    div.className = "message-assistant";
+    div.dataset.streamSession = sessionId;
+
+    var ts = "s-" + Date.now();
+    div.innerHTML = '\
+        <div class="thinking-section" id="think-' + ts + '">\
+            <button class="thinking-toggle" onclick="toggleThinkingPanel(\'think-body-' + ts + '\',this)">\
+                <span class="toggle-arrow">\
+                    <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>\
+                </span>\
+                🧠 <span class="thinking-flow">准备中...</span>\
+            </button>\
+            <div id="think-body-' + ts + '" class="thinking-collapse"></div>\
+        </div>\
+        <div class="bubble" id="bubble-' + ts + '"></div>';
+
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+    return div;
+}
+
+function handleStreamEvent(div, event) {
+    var thinkingBody = div.querySelector('.thinking-collapse');
+    var bubble = div.querySelector('.bubble');
+    var flowEl = div.querySelector('.thinking-flow');
+
+    switch (event.type) {
+        case 'agent_start':
+            // 新增 agent 卡片
+            var name = event.name || 'Agent';
+            var color = COLORS[name] || '#6b7280';
+            var icon = ICONS[name] || '🔹';
+            var card = document.createElement('div');
+            card.className = 'agent-card';
+            card.dataset.agentName = name;
+            card.innerHTML = '\
+                <div class="agent-header" style="border-left-color:' + color + ';">\
+                    <span class="agent-badge" style="background:' + color + '18; color:' + color + ';">' + icon + ' ' + escapeHtml(name) + '</span>\
+                </div>\
+                <div class="agent-body"></div>';
+            thinkingBody.appendChild(card);
+            // 更新流程指示
+            var agents = thinkingBody.querySelectorAll('.agent-card');
+            var names = Array.from(agents).map(function(c) { return c.dataset.agentName; });
+            flowEl.textContent = names.map(function(n) { return (ICONS[n] || '🔹') + ' ' + n; }).join(' → ');
+            // 新卡片展开
+            if (agents.length === 1) {
+                var toggle = div.querySelector('.thinking-toggle');
+                if (toggle) toggle.click();
+            }
+            break;
+
+        case 'token':
+            // 追加到当前 agent 的正文
+            var cards = thinkingBody.querySelectorAll('.agent-card');
+            var lastCard = cards[cards.length - 1];
+            if (lastCard) {
+                var body = lastCard.querySelector('.agent-body');
+                body.textContent += event.content || '';
+            }
+            break;
+
+        case 'agent_end':
+            // agent 完成——内容已通过 token 逐步写入，无需额外操作
+            break;
+
+        case 'done':
+            // 最终回复
+            bubble.innerHTML = markdownToHtml(event.reply || '');
+            div.dataset.thinking = JSON.stringify(event.thinking || []);
+            div.dataset.taskType = event.task_type || '';
+
+            // 添加报告按钮（非闲聊/问答）
+            if (event.thinking && event.thinking.length > 0 && event.task_type !== '闲聊' && event.task_type !== '问答') {
+                var reportBtn = document.createElement('button');
+                reportBtn.className = 'btn btn-sm btn-outline-secondary mt-2 report-btn';
+                reportBtn.textContent = '📥 生成详细报告';
+                reportBtn.addEventListener('click', async function() {
+                    this.disabled = true;
+                    this.textContent = '生成中...';
+                    try {
+                        var r = await fetch('/api/report', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ thinking: event.thinking }),
+                        });
+                        var report = await r.json();
+                        var rd = document.createElement('div');
+                        rd.className = 'mt-2 p-3 border rounded bg-white';
+                        rd.innerHTML = '<strong>📊 详细报告</strong><hr>' + markdownToHtml(report.content);
+                        this.replaceWith(rd);
+                    } catch (e) {
+                        this.textContent = '生成失败，重试';
+                        this.disabled = false;
+                    }
+                });
+                div.querySelector('.bubble').after(reportBtn);
+            }
+
+            // 更新历史
+            messageHistory.push({ role: 'assistant', content: event.reply || '' });
+            break;
+
+        case 'error':
+            bubble.innerHTML = '<div class="bubble" style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;">⚠️ ' + escapeHtml(event.content || '未知错误') + '</div>';
+            break;
+
+        case 'cancelled':
+            bubble.innerHTML = '<div class="bubble" style="color:var(--text-secondary);font-style:italic;">已中断</div>';
+            break;
+    }
+
+    // 滚动到底部
+    var container = document.getElementById('chat-messages');
+    if (container) container.scrollTop = container.scrollHeight;
 }
 
 function renderAgentCard(msg) {
