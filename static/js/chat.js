@@ -261,6 +261,31 @@ async function sendMessage(message) {
     }
 }
 
+// ===== 重新生成（流式） =====
+function regenerate() {
+    // 找到最后一条用户消息
+    var lastUserMsg = null;
+    for (var i = messageHistory.length - 1; i >= 0; i--) {
+        if (messageHistory[i].role === 'user') {
+            lastUserMsg = messageHistory[i].content;
+            break;
+        }
+    }
+    if (!lastUserMsg) return;
+
+    // 移除最后一条助手回复（DOM）
+    var msgs = document.querySelectorAll('#chat-messages .message-assistant');
+    var last = msgs[msgs.length - 1];
+    if (last) last.remove();
+    // 从 history 弹出最后一条 assistant 记录
+    if (messageHistory.length > 0 && messageHistory[messageHistory.length - 1].role === 'assistant') {
+        messageHistory.pop();
+    }
+
+    // 复用发送消息逻辑
+    sendMessage(lastUserMsg);
+}
+
 // ===== 消息渲染 =====
 function appendUserMessage(message) {
     const container = document.getElementById("chat-messages");

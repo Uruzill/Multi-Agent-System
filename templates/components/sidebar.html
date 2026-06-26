@@ -368,9 +368,20 @@ function cancelHideLane() {
     clearTimeout(laneTimer);
 }
 function selectLane(el) {
-    document.querySelectorAll('.lane-option').forEach(function(o) { o.classList.remove('active'); });
-    el.classList.add('active');
     var val = el.getAttribute('data-value');
+    // 同步侧栏弹窗 + 输入区按钮
+    document.querySelectorAll('.lane-option, .mode-chip').forEach(function(o) { o.classList.remove('active'); });
+    document.querySelectorAll('.lane-option[data-value="' + val + '"], .mode-chip[data-value="' + val + '"]').forEach(function(o) { o.classList.add('active'); });
+    // 同步欢迎页
+    document.querySelectorAll('.welcome-mode').forEach(function(m) { m.classList.remove('active'); });
+    var wm = document.querySelector('.welcome-mode[data-value="' + val + '"]');
+    if (wm) wm.classList.add('active');
+    var label = document.getElementById('welcome-mode-label');
+    if (label) {
+        var nameEl = document.querySelector('.welcome-mode.active .welcome-mode-name');
+        if (nameEl) label.innerHTML = '使用 <strong>' + nameEl.textContent + '</strong> 模式进行对话';
+    }
+    // Radio
     var radio = document.getElementById('lane-' + val);
     if (radio) radio.checked = true;
     if (radio) {

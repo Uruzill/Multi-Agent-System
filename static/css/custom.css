@@ -115,6 +115,8 @@ body {
 }
 
 #chat-messages {
+    display: flex;
+    flex-direction: column;
     background-color: var(--bg-chat);
 }
 /* 消息内容居中限宽 */
@@ -123,6 +125,7 @@ body {
     max-width: 900px;
     margin-left: auto;
     margin-right: auto;
+    width: 100%;
 }
 #chat-messages .chat-welcome {
     max-width: 900px;
@@ -656,35 +659,213 @@ body {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 64px 24px;
+    padding: 48px 24px 24px;
     text-align: center;
+    max-width: 520px;
+    margin: 0 auto;
+    width: 100%;
+    box-sizing: border-box;
+}
+/* 首次使用时整体居中 */
+#chat-layout.welcome-active {
+    justify-content: center;
+}
+#chat-layout.welcome-active #chat-messages {
+    flex: 0 0 auto;
+}
+#chat-layout.welcome-active .chat-input-area {
+    padding-top: 8px;
+    position: static;
+}
+
+/* 仅当欢迎页是唯一子元素时竖直居中 */
+.chat-welcome:only-child {
+    flex: 1;
 }
 .chat-welcome-title {
     font-size: 1.5rem;
     font-weight: 700;
     color: var(--text-primary);
-    margin-bottom: 10px;
+    margin-bottom: 6px;
 }
 .chat-welcome-sub {
     font-size: 0.9rem;
     color: var(--text-secondary);
     max-width: 480px;
     line-height: 1.6;
+    margin-bottom: 28px;
+}
+/* 欢迎页模式选择卡片 */
+.welcome-modes {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+    justify-content: center;
+}
+.welcome-mode {
+    flex: 1;
+    max-width: 150px;
+    padding: 16px 12px;
+    border-radius: 14px;
+    border: 1.5px solid #e0e4e8;
+    background: #ffffff;
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+    text-align: center;
+    user-select: none;
+}
+.welcome-mode:hover {
+    border-color: var(--brand-primary);
+    box-shadow: 0 2px 12px rgba(79,140,255,0.10);
+}
+.welcome-mode.active {
+    border-color: var(--brand-primary);
+    background: rgba(79,140,255,0.04);
+    box-shadow: 0 2px 12px rgba(79,140,255,0.12);
+}
+.welcome-mode-icon {
+    font-size: 1.5rem;
+    margin-bottom: 6px;
+}
+.welcome-mode-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+    margin-bottom: 3px;
+}
+.welcome-mode-desc {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+/* ===== 拖拽上传遮罩 ===== */
+.drag-overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: rgba(79, 140, 255, 0.06);
+    border: 2.5px dashed var(--brand-primary);
+    border-radius: 16px;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--brand-primary);
+    z-index: 20;
+    pointer-events: none;
+}
+.drag-overlay.show {
+    display: flex;
+}
+.chat-input-area {
+    position: relative;
+}
+
+/* ===== 文件上传标签 ===== */
+.file-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 0 4px 6px;
+    max-width: 900px;
+    margin: 0 auto;
+}
+.file-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #f0f2f5;
+    border-radius: 8px;
+    padding: 4px 12px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+.file-tag .ft-name {
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+}
+.file-tag .ft-status {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+}
+.file-tag.ft-error {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+/* ===== 骨架屏加载动画 ===== */
+.skeleton-bubble {
+    padding: 16px 20px;
+    max-width: 60%;
+    border-radius: 16px 16px 16px 4px;
+    background: #f0f2f5;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.skeleton-line {
+    height: 14px;
+    border-radius: 8px;
+    background: linear-gradient(90deg, #e0e4e8 25%, #f0f2f5 50%, #e0e4e8 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+}
+.skeleton-line.w-60 { width: 60%; }
+.skeleton-line.w-80 { width: 80%; }
+.skeleton-line.w-45 { width: 45%; }
+@keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* ===== 消息操作工具栏 ===== */
+.msg-toolbar {
+    display: flex;
+    gap: 4px;
+    margin-top: 8px;
+    margin-left: 4px;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+.message-assistant:hover .msg-toolbar {
+    opacity: 1;
+}
+.toolbar-btn {
+    background: transparent;
+    border: none;
+    border-radius: 20px;
+    padding: 6px 16px;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+    font-family: inherit;
+    line-height: 1.4;
+}
+.toolbar-btn:hover {
+    background: #eef0f4;
+    color: var(--text-primary);
+}
+.toolbar-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 /* ===== 加载动画 ===== */
 .loading-dots::after {
-    content: "";
+    content: '';
     animation: dots 1.2s steps(4, end) infinite;
 }
 @keyframes dots {
-    0%   { content: ""; }
-    25%  { content: "."; }
-    50%  { content: ".."; }
-    75%  { content: "..."; }
+    0%   { content: ''; }
+    25%  { content: '.'; }
+    50%  { content: '..'; }
+    75%  { content: '...'; }
 }
 .loading-bubble {
     color: var(--text-secondary);
-    background: #f8f9fc !important;
-    box-shadow: none !important;
 }
