@@ -16,8 +16,6 @@ const COLORS = {
 let messageHistory = [];
 let _currentSessionId = null;
 let pendingFiles = [];
-let _streamSessionId = null;
-let _streamReader = null;
 let _streamSessionId = null;   // 当前活跃的流式会话 ID，用于中断
 let _streamReader = null;      // 当前活跃的 ReadableStream reader，用于中断
 
@@ -91,6 +89,21 @@ function toggleThinkingPanel(id, btn) {
     }
 }
 
+// ===== 中断按钮视觉切换 =====
+function setInterruptMode(active) {
+    var btn = document.querySelector('.send-btn');
+    if (!btn) return;
+    if (active) {
+        btn.dataset.mode = 'stop';
+        btn.innerHTML = '<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+        btn.title = '中断回答 (Esc)';
+    } else {
+        btn.dataset.mode = 'send';
+        btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 11 7-7 7 7M12 4v16"/></svg>';
+        btn.title = '发送 (Enter)';
+    }
+}
+
 // ===== 中断流式请求 =====
 async function abortStream() {
     // 关闭 reader
@@ -105,6 +118,8 @@ async function abortStream() {
         } catch(e) {}
         _streamSessionId = null;
     }
+    // 恢复按钮
+    setInterruptMode(false);
     // 移除骨架屏
     document.querySelectorAll('.message-assistant .bubble:empty').forEach(function(el) {
         var parent = el.closest('.message-assistant');
@@ -177,6 +192,7 @@ async function sendMessage(message) {
     appendUserMessage(message, laneMode);
 
     const loadingId = appendLoadingMessage();
+    setInterruptMode(true);
 
     // 中断上一次仍活跃的流
     await abortStream();
@@ -251,6 +267,7 @@ async function sendMessage(message) {
         // 4. 流结束
         _streamReader = null;
         _streamSessionId = null;
+        setInterruptMode(false);
         var disclaimer = document.getElementById('ai-disclaimer');
         if (disclaimer && !disclaimer.classList.contains('show')) disclaimer.classList.add('show');
         messageHistory.push({ role: "user", content: message });
@@ -258,6 +275,7 @@ async function sendMessage(message) {
 
     } catch (err) {
         removeLoadingMessage(loadingId);
+        setInterruptMode(false);
         _streamReader = null;
         _streamSessionId = null;
         if (err.name === 'AbortError') return;
@@ -345,12 +363,15 @@ function cancelEdit(btn) {
     var msgDiv = btn.closest('.message-user');
     var idx = parseInt(msgDiv.dataset.msgIdx);
     var original = messageHistory[idx] ? messageHistory[idx].content : '';
+    var container = document.getElementById('chat-messages');
+    var scrollPos = container ? container.scrollTop : 0;
     msgDiv.innerHTML = '\
         <div class="bubble">' + escapeHtml(original) + '</div>\
         <div class="user-msg-toolbar">\
             <button class="toolbar-btn" onclick="copyUserMsg(this)" title="复制">复制</button>\
             <button class="toolbar-btn" onclick="editUserMsg(this)" title="修改">修改</button>\
         </div>';
+    if (container) container.scrollTop = scrollPos;
 }
 
 async function submitEdit(btn) {
@@ -369,7 +390,7 @@ async function submitEdit(btn) {
     var target = document.querySelector('.lane-option[data-value="' + laneMode + '"]');
     if (target && typeof selectLane === 'function') selectLane(target);
 
-    // 立即清理旧消息，显示新消息 + 加载动画
+    // 立即清理旧消息
     messageHistory.splice(idx);
     var next = msgDiv.nextElementSibling;
     while (next) { var toRemove = next; next = next.nextElementSibling; toRemove.remove(); }
@@ -380,17 +401,18 @@ async function submitEdit(btn) {
             <button class="toolbar-btn" onclick="editUserMsg(this)" title="修改">修改</button>\
         </div>';
     msgDiv.dataset.lane = laneMode;
-    var loadingId = appendLoadingMessage();
 
+    // 用流式创建助手回复（与 sendMessage 一致）
     try {
-        var resp = await fetch('/api/chat/start', {
+        var startResp = await fetch('/api/chat/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message: message, lane_mode: laneMode, history: messageHistory }),
         });
-        if (!resp.ok) throw new Error('启动失败');
-        var { session_id } = await resp.json();
-        var streamResp = await fetch('/api/chat/stream/' + session_id, { signal: new AbortController().signal });
+        if (!startResp.ok) throw new Error('启动失败');
+        var { session_id } = await startResp.json();
+        var assistantDiv = createAssistantSkeleton(session_id);
+        var streamResp = await fetch('/api/chat/stream/' + session_id);
         var reader = streamResp.body.getReader();
         var decoder = new TextDecoder();
         var buf = '';
@@ -405,24 +427,18 @@ async function submitEdit(btn) {
                     if (line.startsWith('data: ')) {
                         try {
                             var ev = JSON.parse(line.slice(6));
+                            handleStreamEvent(assistantDiv, ev);
                             if (ev.type === 'done') {
-                                removeLoadingMessage(loadingId);
-                                var bubble = msgDiv.querySelector('.bubble');
-                                if (bubble) bubble.innerHTML = markdownToHtml(ev.reply || '');
-                                messageHistory.push({ role: 'assistant', content: ev.reply || '' });
+                                messageHistory.push({ role: 'user', content: message });
+                                messageHistory.push({ role: 'assistant', content: ev.reply || '', thinking: ev.thinking || [] });
                                 saveCurrentSession();
-                            } else if (ev.type === 'error') {
-                                removeLoadingMessage(loadingId);
-                                appendErrorMessage(ev.content || '错误');
                             }
                         } catch(e) {}
                     }
                 }
             }
         }
-        removeLoadingMessage(loadingId);
     } catch (err) {
-        removeLoadingMessage(loadingId);
         if (err.name === 'AbortError') return;
         appendErrorMessage(err.message);
     }
@@ -565,7 +581,7 @@ function handleStreamEvent(div, event) {
             break;
 
         case 'token':
-            // 追加到当前 agent 的正文
+            // 追加到当前 agent 的正文（实时流式用 textContent，agent_end 时统一 md 渲染）
             var cards = thinkingBody.querySelectorAll('.agent-card');
             var lastCard = cards[cards.length - 1];
             if (lastCard) {
@@ -575,21 +591,40 @@ function handleStreamEvent(div, event) {
             break;
 
         case 'agent_end':
-            // agent 完成——内容已通过 token 逐步写入，无需额外操作
+            // agent 完成——将纯文本渲染为 Markdown
+            var cards2 = thinkingBody.querySelectorAll('.agent-card');
+            var lastCard2 = cards2[cards2.length - 1];
+            if (lastCard2) {
+                var body2 = lastCard2.querySelector('.agent-body');
+                var raw = body2.textContent;
+                if (raw) {
+                    body2.innerHTML = markdownToHtml(raw);
+                }
+            }
             break;
 
         case 'done':
             // 最终回复
             bubble.innerHTML = markdownToHtml(event.reply || '');
+            highlightCodeBlocks(bubble);
             div.dataset.thinking = JSON.stringify(event.thinking || []);
             div.dataset.taskType = event.task_type || '';
 
-            // 添加报告按钮（非闲聊/问答）
-            if (event.thinking && event.thinking.length > 0 && event.task_type !== '闲聊' && event.task_type !== '问答') {
-                var reportBtn = document.createElement('button');
-                reportBtn.className = 'btn btn-sm btn-outline-secondary mt-2 report-btn';
-                reportBtn.textContent = '📥 生成详细报告';
-                reportBtn.addEventListener('click', async function() {
+            // 操作工具栏（复制 / 重新回答 / 生成报告）
+            var tb = document.createElement('div');
+            tb.className = 'msg-toolbar';
+            var tbHtml = '<button class="toolbar-btn" onclick="copyReply(this)" data-text="' + escapeAttr(event.reply || '') + '" title="复制回复">复制</button>' +
+                '<button class="toolbar-btn" onclick="regenerate()" title="重新回答">重新回答</button>';
+            var hasThinking = event.thinking && event.thinking.length > 0 && event.task_type !== '闲聊' && event.task_type !== '问答';
+            if (hasThinking) {
+                tbHtml += '<button class="toolbar-btn report-btn" title="生成报告">生成报告</button>';
+            }
+            tb.innerHTML = tbHtml;
+            div.appendChild(tb);
+
+            // 报告生成逻辑（内容追加到工具栏后方）
+            if (hasThinking) {
+                tb.querySelector('.report-btn').addEventListener('click', async function() {
                     this.disabled = true;
                     this.textContent = '生成中...';
                     try {
@@ -600,19 +635,24 @@ function handleStreamEvent(div, event) {
                         });
                         var report = await r.json();
                         var rd = document.createElement('div');
-                        rd.className = 'mt-2 p-3 border rounded bg-white';
-                        rd.innerHTML = '<strong>📊 详细报告</strong><hr>' + markdownToHtml(report.content);
-                        this.replaceWith(rd);
+                        rd.className = 'report-content';
+                        rd.innerHTML = '<div class="report-header">📊 详细报告</div>' + markdownToHtml(report.content);
+                        // 插入到工具栏后面，不替换按钮
+                        tb.parentNode.insertBefore(rd, tb.nextSibling);
+                        this.textContent = '已完成';
+                        this.style.pointerEvents = 'none';
+                        this.style.opacity = '0.5';
                     } catch (e) {
-                        this.textContent = '生成失败，重试';
+                        this.textContent = '生成报告';
                         this.disabled = false;
+                        this.style.pointerEvents = '';
+                        this.style.opacity = '';
                     }
                 });
-                div.querySelector('.bubble').after(reportBtn);
             }
 
             // 更新历史
-            messageHistory.push({ role: 'assistant', content: event.reply || '' });
+            messageHistory.push({ role: 'assistant', content: event.reply || '', thinking: event.thinking || [] });
             break;
 
         case 'error':
@@ -624,9 +664,12 @@ function handleStreamEvent(div, event) {
             break;
     }
 
-    // 滚动到底部
+    // 智能滚动：仅在用户当前位于底部附近时才自动滚动
     var container = document.getElementById('chat-messages');
-    if (container) container.scrollTop = container.scrollHeight;
+    if (container) {
+        var nearBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 60;
+        if (nearBottom) container.scrollTop = container.scrollHeight;
+    }
 }
 
 function renderAgentCard(msg) {
@@ -637,7 +680,7 @@ function renderAgentCard(msg) {
             <div class="agent-header" style="border-left-color:${color};">
                 <span class="agent-badge" style="background:${color}18; color:${color};">${icon} ${escapeHtml(msg.name)}</span>
             </div>
-            <div class="agent-body">${escapeHtml(msg.content).replace(/\n/g, "<br>")}</div>
+            <div class="agent-body">${markdownToHtml(msg.content || '')}</div>
         </div>
     `;
 }
@@ -844,12 +887,22 @@ function markdownToHtml(md) {
             var label = lang || 'code';
             var esced = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
             var escapedLabel = label.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-            return '<div class="code-block" id="' + id + '"><div class="code-lang">' + escapedLabel + '</div><button class="code-copy" onclick="var p=document.getElementById(\'' + id + '\');var t=p.querySelector(\'code\').textContent;navigator.clipboard.writeText(t).then(function(){var b=p.querySelector(\'.code-copy\');b.textContent=\'已复制\';setTimeout(function(){b.textContent=\'复制\'},2000)})">复制</button><pre><code>' + esced + '</code></pre></div>';
+            return '<div class="code-block" id="' + id + '" data-lang="' + escapedLabel + '"><button class="code-copy" onclick="var p=document.getElementById(\'' + id + '\');var t=p.querySelector(\'code\').textContent;navigator.clipboard.writeText(t).then(function(){var b=p.querySelector(\'.code-copy\');b.textContent=\'已复制\';setTimeout(function(){b.textContent=\'复制\'},2000)})">复制</button><pre><code>' + esced + '</code></pre></div>';
         };
         marked.setOptions({ renderer: renderer, gfm: true, breaks: true });
-        return marked.parse(md);
+        var html = marked.parse(md);
+        // 异步高亮（交给渲染后处理）
+        return html;
     }
     return escapeHtml(md).replace(/\n/g, '<br>');
+}
+
+function highlightCodeBlocks(container) {
+    if (typeof hljs !== 'undefined') {
+        container.querySelectorAll('.code-block code').forEach(function(el) {
+            hljs.highlightElement(el);
+        });
+    }
 }
 
 // ===== 会话保存（适配 db.py 后端） =====

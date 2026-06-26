@@ -6,7 +6,7 @@
     <title>多智能体协作系统</title>
     <script src="/static/vendor/tailwind-browser.js"></script>
     <link href="/static/vendor/daisyui.css" rel="stylesheet">
-    <link href="/static/css/custom.css?v=35" rel="stylesheet">
+    <link href="/static/css/custom.css?v=38" rel="stylesheet">
     <script>
         const systemStatus = {
             {% for name, model_id in role_model.items() %}
@@ -58,6 +58,8 @@
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="/static/js/chat.js"></script>
     <script>
         function toggleDrawer() {

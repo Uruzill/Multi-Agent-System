@@ -89,11 +89,11 @@ body {
 
 /* 开启新对话按钮 */
 .new-chat-btn {
-    width: 260px;
+    width: 220px;
     height: 40px;
     border-radius: 50px;
     background: #fff;
-    border: 0.5px solid #d1d5db;
+    border: 1px solid #e0e4e8;
     box-shadow: 0 2px 6px rgba(0,0,0,0.06);
     display: flex;
     align-items: center;
@@ -118,17 +118,43 @@ body {
     display: flex;
     flex-direction: column;
     background-color: var(--bg-chat);
+    flex: 1;
+    min-height: 0;
 }
+/* 非欢迎页时 #chat-layout 自然撑满，消息区填满剩余空间 */
+#chat-layout:not(.welcome-active) #chat-messages {
+    flex: 1;
+}
+/* 确保粘性输入框始终在可见区域底部 */
+.chat-input-area {
+    flex-shrink: 0;
+}
+
+/* 修复侧栏不跟随主界面滑动 */
+.drawer-side {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 50;
+}
+.drawer-content {
+    margin-left: 18rem; /* 与 w-72 匹配 */
+}
+.drawer-toggle:checked ~ .drawer-side {
+    position: fixed !important;
+}
+
 /* 消息内容居中限宽 */
 #chat-messages .message-user,
 #chat-messages .message-assistant {
-    max-width: 900px;
+    max-width: calc(900px - 2ch);
     margin-left: auto;
     margin-right: auto;
     width: 100%;
 }
 #chat-messages .chat-welcome {
-    max-width: 900px;
+    max-width: calc(900px - 2ch);
     margin-left: auto;
     margin-right: auto;
 }
@@ -152,14 +178,15 @@ body {
     resize: none;
     border: 1px solid #e0e4e8;
     border-radius: 24px;
-    padding: 14px 52px 14px 50px;
-    font-size: 0.9rem;
+    padding: 16px 90px 16px 18px;
+    font-size: 0.92rem;
     line-height: 1.55;
     font-family: inherit;
     outline: none;
     background: #ffffff;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
     color: var(--text-primary);
-    min-height: 92px;
+    min-height: 104px;
     max-height: 200px;
     transition: border-color 0.2s, box-shadow 0.2s;
     overflow-y: auto;
@@ -175,9 +202,9 @@ body {
 /* 附件按钮：悬浮在输入框左下角 */
 .attach-btn {
     position: absolute;
-    left: 10px;
-    bottom: 14px;
-    width: 32px;
+    right: 54px;
+    bottom: 12px;
+    width: 36px;
     height: 32px;
     border-radius: 8px;
     border: none;
@@ -197,10 +224,10 @@ body {
 /* 发送按钮：悬浮在输入框右下角 */
 .send-btn {
     position: absolute;
-    right: 8px;
-    bottom: 10px;
-    width: 34px;
-    height: 34px;
+    right: 14px;
+    bottom: 14px;
+    width: 38px;
+    height: 38px;
     border-radius: 50%;
     border: none;
     background: var(--brand-primary);
@@ -220,29 +247,38 @@ body {
     transform: scale(0.95);
 }
 
+/* ===== 侧栏 Logo ===== */
+.sidebar-logo {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #000000;
+    letter-spacing: -0.02em;
+}
+
 .message-user {
     display: flex;
-    justify-content: flex-end;
-    margin-bottom: 1rem;
-    padding: 0 4px;
+    flex-direction: column;
+    align-items: flex-end;
+    margin-bottom: 0.75rem;
 }
 
 .message-user .bubble {
-    background-color: var(--brand-primary);
-    color: white;
-    border-radius: 16px 4px 16px 16px;
-    padding: 14px 20px;
-    max-width: 80%;
+    background-color: #EDF3FE;
+    color: var(--text-primary);
+    border-radius: 14px;
+    padding: 10px 16px;
+    max-width: 100%;
     word-wrap: break-word;
     overflow-x: auto;
-    line-height: 1.7;
+    line-height: 1.6;
+    font-size: 0.92em;
+    white-space: pre-wrap;
 }
 
 .message-assistant {
     display: flex;
     flex-direction: column;
-    margin-bottom: 1rem;
-    padding: 0 4px;
+    margin-bottom: 0.75rem;
 }
 
 .message-assistant .bubble {
@@ -250,7 +286,7 @@ body {
     border: none;
     box-shadow: none;
     padding: 4px 20px 4px 4px;
-    max-width: 80%;
+    max-width: 100%;
     word-wrap: break-word;
     overflow-x: auto;
     line-height: 1.7;
@@ -264,9 +300,10 @@ body {
 }
 
 /* ===== 代码块 ===== */
+/* ===== 代码块 ===== */
 .code-block {
     background: #f6f8fa;
-    border: 1px solid #d0d7de;
+    border: none;
     border-radius: 10px;
     margin: 10px 0;
     overflow: hidden;
@@ -274,24 +311,33 @@ body {
     max-width: 100%;
     box-sizing: border-box;
 }
-.code-lang {
-    position: absolute;
-    top: 6px;
-    right: 72px;
-    font-size: 0.7rem;
+/* 代码块头部栏：语言标签左 + 复制按钮右 */
+.code-block::before {
+    content: attr(data-lang);
+    display: block;
+    padding: 6px 14px;
+    font-size: 0.72rem;
+    font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
     color: #57606a;
-    font-family: monospace;
+    background: #eef0f4;
+    letter-spacing: 0.3px;
 }
 .code-block pre {
     margin: 0;
-    padding: 14px 16px;
+    padding: 12px 16px;
+    background: transparent;
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 .code-block code {
     font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
     font-size: 0.82rem;
     line-height: 1.65;
     color: #24292f;
+    background: transparent !important;
+}
+.code-block .hljs {
+    background: transparent !important;
 }
 .code-copy {
     position: absolute;
@@ -301,16 +347,23 @@ body {
     color: #57606a;
     background: #ffffff;
     border: 1px solid #d0d7de;
-    border-radius: 4px;
-    padding: 1px 8px;
+    border-radius: 6px;
+    padding: 2px 10px;
     cursor: pointer;
     font-family: inherit;
     transition: all 0.15s;
+    opacity: 0;
+}
+.code-block:hover .code-copy {
+    opacity: 1;
 }
 .code-copy:hover {
     color: #24292f;
     border-color: #8b949e;
     background: #f3f4f6;
+}
+.code-lang {
+    display: none;
 }
 
 /* ===== 思考面板 ===== */
@@ -649,8 +702,10 @@ body {
     font-size: 0.82rem;
     line-height: 1.6;
     color: #374151;
-    white-space: pre-wrap;
     word-break: break-word;
+}
+.agent-body p {
+    margin: 0.3em 0;
 }
 
 /* ===== 欢迎页 ===== */
@@ -669,6 +724,10 @@ body {
 /* 首次使用时整体居中 */
 #chat-layout.welcome-active {
     justify-content: center;
+}
+#chat-layout.welcome-active {
+    justify-content: center;
+    overflow: hidden;
 }
 #chat-layout.welcome-active #chat-messages {
     flex: 0 0 auto;
