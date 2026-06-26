@@ -71,6 +71,9 @@ app.include_router(auth_router, prefix="/api/auth", tags=["认证"])
 app.include_router(session_router, prefix="/api/sessions", tags=["会话"])
 app.include_router(user_router, prefix="/api/user", tags=["用户配置"])
 
+from router.router import router as chat_router
+app.include_router(chat_router, prefix="/api", tags=["流式聊天"])
+
 
 @app.get("/", response_class=HTMLResponse, tags=["页面"])
 async def index(request: Request):
@@ -86,43 +89,23 @@ async def index(request: Request):
     )
 
 
-@app.post("/api/chat", tags=["聊天"])
-async def chat(request: Request):
-    """处理用户消息，返回 Agent 协作结果"""
-    from app.chat import run_chat_pipeline
-
-    data = await request.json()
-    user_input = data.get("message", "")
-    lane_mode = data.get("lane_mode", "auto")
-    history = data.get("history", [])
-    try:
-        result = run_chat_pipeline(user_input, history=history, lane_mode=lane_mode)
-        return JSONResponse(result)
-    except Exception as e:
-        import traceback
-        logging.error(f"聊天管道异常: {traceback.format_exc()}")
-        return JSONResponse(
-            {
-                "reply": f"❌ 执行失败: {str(e)}",
-                "error": str(e),
-                "thinking": [],
-                "task_type": "错误",
-                "generated_files": [],
-            },
-            status_code=500,
-        )
-
-
 @app.post("/api/report", tags=["聊天"])
 async def generate_report(request: Request):
     """从 thinking 记录生成详细报告"""
-    from app.chat import generate_report_from_thinking
-
     data = await request.json()
     thinking = data.get("thinking", [])
 
     try:
-        report = generate_report_from_thinking(thinking)
+        from agents import create_llm, SYSTEM_PROMPTS
+        llm = create_llm("Summarizer")
+        context = "\n\n".join(f"{m.get('name', '')}: {m.get('content', '')[:2000]}" for m in thinking if m.get("content"))
+        prompt = (
+            f"{SYSTEM_PROMPTS['Summarizer']}\n\n"
+            f"以下是一个多智能体协作过程的内部记录。请你据此生成一份结构化的执行报告。\n\n"
+            f"协作记录：\n\n{context}"
+        )
+        response = llm.invoke(prompt)
+        report = response.content if hasattr(response, "content") else str(response)
     except Exception:
         report = "# 报告生成失败\n\n请稍后重试。"
 

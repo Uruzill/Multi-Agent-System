@@ -5,7 +5,10 @@
 """
 
 import json
+import logging
 from urllib.request import Request, urlopen
+
+logger = logging.getLogger(__name__)
 
 _ROUTER_SYSTEM = (
     "你是任务分类器。只需要分类一下这个问题的类型、复杂度，以及是否需要附加执行报告。\n\n"
@@ -49,12 +52,19 @@ def _get_model_info():
     return _MODEL_INFO
 
 
-def classify(user_input: str) -> tuple[str, str]:
-    """返回 (task_type, complexity)
+def classify(user_input: str, lane_mode: str = "auto") -> tuple[str, str, bool]:
+    """返回 (task_type, complexity, need_report)
     task_type: 编程 | 写作 | 分析 | 问答 | 闲聊
     complexity: 轻 | 重
+    need_report: True | False
+
+    lane_mode 覆盖规则：
+      - "fast" → complexity 强制为 "轻"
+      - "slow" → complexity 强制为 "重"
+      - "auto" → 不强制覆盖，由 LLM 判断
     """
     info = _get_model_info()
+    logger.info("classify | input=%s | lane=%s | model=%s", user_input[:60], lane_mode, info["model"])
     payload = json.dumps(
         {
             "model": info["model"],
@@ -80,10 +90,11 @@ def classify(user_input: str) -> tuple[str, str]:
         resp = urlopen(req, timeout=15)
         data = json.loads(resp.read())
         raw = data["choices"][0]["message"]["content"].strip()
-    except Exception:
+        logger.info("classify | raw=%s", raw)
+    except Exception as e:
+        logger.warning("classify | LLM call failed: %s, fallback to (闲聊,轻,True)", e)
         return ("闲聊", "轻", True)
 
-    # 解析 "编程|重" 或 "问答|轻"
     parts = [p.strip() for p in raw.replace("｜", "|").split("|")]
 
     valid_types = {"编程", "写作", "分析", "问答", "闲聊"}
@@ -101,8 +112,8 @@ def classify(user_input: str) -> tuple[str, str]:
         elif p == "False":
             need_report = False
 
-    # ── 关键词兜底覆写逻辑 ──
     import re
+
     _search = re.search(r"(搜索|查资料|检索|查找.*知识|基于知识库)", user_input, re.IGNORECASE)
     if _search and complexity == "轻":
         complexity = "重"
@@ -122,4 +133,19 @@ def classify(user_input: str) -> tuple[str, str]:
             task_type = "问答"
             complexity = "轻"
 
+    # ── 关键词覆写日志 ──
+    if _search:
+        logger.info("classify | keyword_override=search | task_type=%s | complexity=%s", task_type, complexity)
+    if _analysis:
+        logger.info("classify | keyword_override=analysis | task_type=%s | complexity=%s", task_type, complexity)
+    if not _search and "_non_py" in dir():
+        logger.info("classify | keyword_override=non_py | task_type=%s | complexity=%s", task_type, complexity)
+
+    # ── 车道模式覆盖 ──
+    if lane_mode == "fast":
+        complexity = "轻"
+    elif lane_mode == "slow":
+        complexity = "重"
+
+    logger.info("classify | result=%s|%s|%s", task_type, complexity, need_report)
     return (task_type, complexity, need_report)
