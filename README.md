@@ -174,19 +174,27 @@ python main.py
 
 ```
 Multi-Agent-System/
-├── main.py                  # FastAPI 入口，22 个 API 端点
-├── db.py                    # SQLite 数据库（用户 + 会话 + Token 持久化）
-├── router.py                # Router 意图分类器
+├── main.py                  # FastAPI 入口
 ├── config.py                # LLM 模型配置
+├── router.py                # Router 意图分类器
 ├── workflow.py              # LangGraph 工作流编排
-├── executor.py              # subprocess 代码执行沙箱
+├── executor.py              # Docker/subprocess 代码执行沙箱
 ├── agents.py                # 7 个 Agent System Prompt 定义
 ├── tools.py                 # 7 个 LangChain 工具
+├── config.py                # 模型池 & 角色映射（ROLES / MODEL_POOL / ROLE_MODEL）
 ├── requirements.txt         # Python 依赖清单
 ├── .env.example             # 环境变量模板
+├── LICENSE                  # MIT 开源许可
+│
+├── user/                    # 用户管理模块
+│   ├── __init__.py          # 包标识
+│   ├── auth.py              # bcrypt 密码哈希 + JWT 创建/解码
+│   ├── db.py                # SQLite CRUD（users/sessions/user_configs）+ FTS5 全文索引 + schema 迁移
+│   ├── helpers.py           # require_auth 依赖 + _get_db
+│   └── routes.py            # 认证 / 会话 / 用户配置 / 会话搜索 API 路由
 │
 ├── app/
-│   ├── auth.py              # 认证 API（注册/登录/退出/me）+ Token 依赖
+│   ├── __init__.py          # 包标识
 │   ├── chat.py              # 聊天管道（Router + 关键词覆写 + 90s 超时）
 │   ├── knowledge.py         # 知识库管理 API（Token 鉴权）
 │   └── ocr.py               # Tesseract OCR 模块
@@ -207,12 +215,16 @@ Multi-Agent-System/
 │   └── chroma_db/           # 向量数据库（按 user_id 分目录）
 │
 ├── tests/
-│   └── test_knowledge_routes.py  # 9 个自动化测试用例
+│   ├── test_knowledge_routes.py  # 9 个知识库 API 测试
+│   └── test_fts5.py              # 17 个 FTS5 全文检索 + 迁移 + WAL 测试
 │
 ├── docs/
+│   ├── api.md               # API 文档
+│   ├── user.md              # 用户管理体系设计
+│   ├── 答辩报告.md           # 项目答辩报告
+│   ├── 项目要求.txt          # 实训项目要求
 │   └── superpowers/         # 设计文档与实现计划
 │
-├── 答辩报告.md               # 项目答辩报告
 └── README.md                # 本文件
 ```
 
@@ -221,7 +233,7 @@ Multi-Agent-System/
 ## 🌐 API 接口
 
 ### 聊天与报告
-
+*
 | 方法 | 路径 | 鉴权 | 说明 |
 |------|------|:----:|------|
 | `GET` | `/` | 无 | 聊天页面 |
@@ -251,17 +263,20 @@ Multi-Agent-System/
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `GET` | `/api/sessions` | 列出用户会话 |
+| `GET` | `/api/sessions/search?q=xxx` | **全文检索会话消息**（FTS5，带高亮片段） |
 | `POST` | `/api/sessions` | 保存/创建会话 |
 | `GET` | `/api/sessions/{id}` | 获取会话（校验归属） |
 | `DELETE` | `/api/sessions/{id}` | 删除会话（校验归属） |
 
 ### 配置管理
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET/POST` | `/api/config/roles` | 角色→模型映射 |
-| `POST` | `/api/config/models` | 添加自定义模型 |
-| `DELETE` | `/api/config/models/{name}` | 删除自定义模型 |
+| 方法 | 路径 | 鉴权 | 说明 |
+|------|------|:----:|------|
+| `GET` | `/api/auth/system-config` | 无 | 系统默认模型配置 |
+| `GET` | `/api/user/config` | 需 | 获取用户角色映射 |
+| `PUT` | `/api/user/config` | 需 | 保存用户角色映射 |
+| `POST` | `/api/user/custom-models` | 需 | 添加自定义模型 |
+| `DELETE` | `/api/user/custom-models/{key}` | 需 | 删除自定义模型 |
 
 ---
 
@@ -271,17 +286,18 @@ Multi-Agent-System/
 pytest tests/ -v
 ```
 
-9 个测试用例覆盖认证 + 知识库 CRUD：
+26 个测试用例覆盖认证 + 知识库 + FTS5 全文检索 + 迁移：
 
-- ✅ 用户注册
-- ✅ 用户登录
-- ✅ Token 获取当前用户
-- ✅ 知识库统计
-- ✅ 索引重建
-- ✅ 文件上传
-- ✅ 非法类型拦截
-- ✅ 文档删除
-- ✅ 删除不存在的文档
+**认证 & 知识库 (9):**
+- ✅ 用户注册 / 登录 / Token 获取
+- ✅ 知识库统计 / 索引重建 / 文件上传 / 非法类型拦截
+- ✅ 文档删除 / 删除不存在的文档
+
+**FTS5 全文检索 & 迁移 (17):**
+- ✅ Schema 版本管理（空白库 → v2 / 版本超前拒绝 / 幂等）
+- ✅ FTS5 同步（创建 / 更新 / 删除 / 空消息过滤 / 回填）
+- ✅ 全文搜索（中文匹配 / 高亮片段 / 用户隔离 / 特殊字符 / 空查询 / API 端点 / 鉴权）
+- ✅ WAL checkpoint 执行
 
 ---
 
@@ -297,6 +313,9 @@ pytest tests/ -v
 | v3.2 | 06-24 | daisyUI 前端重构，SQLite 用户/会话持久化，lifespan 启动 |
 | **v3.3** | **06-24** | **用户认证系统（bcrypt + Token），知识库/会话用户隔离，游客 sessionStorage** |
 | **v3.4** | **06-24** | **Docker 沙箱隔离，Token 7 天过期+续期，登录限流，安全防护升级至 10 层** |
+| **v3.5** | **06-26** | **FTS5 全文检索 + Schema 版本自动迁移 + WAL checkpoint + config.py 重构** |
+| **v3.3** | **06-24** | **用户认证系统（bcrypt + Token），知识库/会话用户隔离，游客 sessionStorage** |
+| **v3.4** | **06-24** | **Docker 沙箱隔离，Token 7 天过期+续期，登录限流，安全防护升级至 10 层** |
 
 ---
 
@@ -310,7 +329,7 @@ pytest tests/ -v
 | Web 框架 | FastAPI ≥0.115 + Jinja2 ≥3.1 |
 | CSS 框架 | daisyUI 5 + Tailwind CSS 4 |
 | 前端交互 | 原生 JavaScript（fetch + DOM） |
-| 数据库 | SQLite（WAL 模式，标准库 sqlite3） |
+| 数据库 | SQLite（WAL 模式 + FTS5 全文索引 + Schema 版本自动迁移） |
 | 密码哈希 | bcrypt ≥4.0 |
 | 容器沙箱 | Docker |
 | 向量数据库 | ChromaDB ≥1.5 |

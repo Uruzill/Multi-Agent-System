@@ -105,6 +105,22 @@ async def list_sessions(request: Request, user: dict = Depends(require_auth)):
     return JSONResponse(result)
 
 
+@session_router.get("/search")
+async def search_sessions(
+    request: Request,
+    q: str = "",
+    limit: int = 20,
+    offset: int = 0,
+    user: dict = Depends(require_auth),
+):
+    """全文检索当前用户的会话消息"""
+    db = _get_db(request)
+    results = db.search_messages(user["user_id"], q, limit, offset)
+    return JSONResponse(results)
+
+
+# ─── 以下为原有的 C(R)UD 路由 ───
+
 @session_router.post("")
 async def save_session(request: Request, user: dict = Depends(require_auth)):
     db = _get_db(request)

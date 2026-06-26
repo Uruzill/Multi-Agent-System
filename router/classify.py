@@ -8,6 +8,8 @@ import json
 import logging
 from urllib.request import Request, urlopen
 
+from config import get_model_config
+
 logger = logging.getLogger(__name__)
 
 _ROUTER_SYSTEM = (
@@ -35,23 +37,6 @@ _ROUTER_SYSTEM = (
     "最高规则： 如果是写作必须使用False\n"
 )
 
-_MODEL_INFO = None
-
-
-def _get_model_info():
-    global _MODEL_INFO
-    if _MODEL_INFO is None:
-        from config import get_config
-
-        cfg = get_config("Planner")["config_list"][0]
-        _MODEL_INFO = {
-            "model": cfg["model"],
-            "api_key": cfg.get("api_key", "ollama"),
-            "base_url": cfg.get("base_url", "http://localhost:11434/v1"),
-        }
-    return _MODEL_INFO
-
-
 def classify(user_input: str, lane_mode: str = "auto") -> tuple[str, str, bool]:
     """返回 (task_type, complexity, need_report)
     task_type: 编程 | 写作 | 分析 | 问答 | 闲聊
@@ -63,7 +48,7 @@ def classify(user_input: str, lane_mode: str = "auto") -> tuple[str, str, bool]:
       - "slow" → complexity 强制为 "重"
       - "auto" → 不强制覆盖，由 LLM 判断
     """
-    info = _get_model_info()
+    info = get_model_config("Planner")
     logger.info("classify | input=%s | lane=%s | model=%s", user_input[:60], lane_mode, info["model"])
     payload = json.dumps(
         {

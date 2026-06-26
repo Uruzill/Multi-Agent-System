@@ -22,6 +22,18 @@ def _get_user_kb_dirs(user_id: str):
     return docs, chroma
 
 
+@router.get("/files")
+async def kb_files(user: dict = Depends(require_auth)):
+    """列出用户知识库中的文件"""
+    docs_dir, _ = _get_user_kb_dirs(user["user_id"])
+    files = []
+    for fname in os.listdir(docs_dir):
+        fpath = os.path.join(docs_dir, fname)
+        if os.path.isfile(fpath) and fname.rsplit(".", 1)[-1].lower() in ALLOWED_EXTENSIONS:
+            files.append({"name": fname, "size": os.path.getsize(fpath)})
+    return JSONResponse(files)
+
+
 @router.get("/stats")
 async def kb_stats(user: dict = Depends(require_auth)):
     from rag.knowledge_base import get_stats

@@ -14,7 +14,7 @@ if _PROJECT_DIR not in sys.path:
 from dotenv import load_dotenv
 load_dotenv(os.path.join(_PROJECT_DIR, ".env"), override=True)
 
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+os.environ["HF_ENDPOINT"] = os.getenv("HF_ENDPOINT", "https://hf-mirror.com")
 os.environ["NO_PROXY"] = "localhost,127.0.0.1"
 os.environ["no_proxy"] = "localhost,127.0.0.1"
 os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -39,23 +39,32 @@ from user.db import Database
 try:
     get_model_display = _cfg.get_model_display
     ROLE_MODEL = _cfg.ROLE_MODEL
+    ROLES = _cfg.ROLES
 except AttributeError:
-    ROLE_MODEL = {k: "?" for k in [
-        "Planner", "Retriever", "Coder", "Writer",
-        "Tester", "Summarizer", "Bot",
-    ]}
+    ROLES = ("Planner", "Retriever", "Coder", "Writer",
+             "Tester", "Summarizer", "Bot")
+    ROLE_MODEL = {k: "?" for k in ROLES}
 
-    def get_model_display(role):
+    def get_model_display(role: str) -> str:
         return "?"
 
 # ──── FastAPI 应用 ────
 @asynccontextmanager
-async def lifespan(a: FastAPI):
-    """启动时初始化数据库，关闭时清理连接"""
-    a.state.db = Database(os.path.join(_PROJECT_DIR, "data.db"))
+async def lifespan(app: FastAPI):
+    """启动时初始化数据库（含迁移校验），关闭时执行 WAL 检查点"""
+    db = Database(os.path.join(_PROJECT_DIR, "data.db"))
+    app.state.db = db
     yield
+    # 关闭时强制 WAL 检查点，将 -wal 文件内容写入主数据库
+    try:
+        with db._conn() as conn:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "WAL checkpoint 执行失败，下次启动时 SQLite 将自动恢复", exc_info=True
+        )
 
-app = FastAPI(title="多智能体协作系统", version="3.1", lifespan=lifespan)
+app = FastAPI(title="多智能体协作系统", version="3.4", lifespan=lifespan)
 
 # ──── 静态文件 & 模板 ────
 app.mount("/static", StaticFiles(directory=os.path.join(_PROJECT_DIR, "static")), name="static")

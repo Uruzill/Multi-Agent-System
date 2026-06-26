@@ -8,12 +8,12 @@ os.environ["NO_PROXY"] = os.environ.get("NO_PROXY", "") + ",localhost,127.0.0.1"
 os.environ["no_proxy"] = os.environ.get("no_proxy", "") + ",localhost,127.0.0.1"
 
 from langchain_deepseek import ChatDeepSeek
-from config import get_config
+from config import get_model_config
 
 
 def create_llm(role: str, temperature: float = 0.3):
     """创建指定角色使用的 LLM 实例"""
-    cfg = get_config(role)["config_list"][0]
+    cfg = get_model_config(role)
     return ChatDeepSeek(
         model=cfg["model"],
         api_key=cfg["api_key"],

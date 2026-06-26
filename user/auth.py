@@ -7,7 +7,9 @@ import time
 import bcrypt
 import jwt
 
-_JWT_SECRET = os.getenv("JWT_SECRET", "multi-agent-system-dev-secret-key!@#")
+_JWT_SECRET = os.getenv("JWT_SECRET")
+if not _JWT_SECRET:
+    raise RuntimeError("JWT_SECRET 环境变量未设置，请在 .env 中配置 JWT_SECRET=<随机密钥>")
 _JWT_ALGO = "HS256"
 _JWT_TTL = 7 * 24 * 3600  # 7 天
 

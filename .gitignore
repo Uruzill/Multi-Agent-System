@@ -10,11 +10,20 @@ rag/documents/*/
 
 # === 临时文件 ===
 **/coding/tmp_code_*/
-**/coding/*.png
+coding/*.png
+coding/*.csv
+coding/*.txt
 _test_*.py
+
+# === 测试缓存 ===
+.pytest_cache/
+
+# === 工具内部文件 ===
+.superpowers/
 
 # === 调试日志 ===
 db_debug.log
+node_modules/
 
 # === 输出产物（可重新运行生成） ===
 **/reports/

@@ -1,7 +1,7 @@
-# 多智能体协作系统 — API 接口文档 v3.1
+# 多智能体协作系统 — API 接口文档 v3.5
 
-> 前端（张磊）←→ 后端（曾瑞安）
-> 本文件记录所有现有及新增接口，供前后端独立开发。
+> 前端（张磊）←→ 后端（曾瑞安，高晟然，张耘赫）
+> 本文件记录所有接口，供前后端独立开发。
 
 ---
 
@@ -9,8 +9,8 @@
 
 1. [聊天接口](#1-聊天接口)
 2. [报告生成](#2-报告生成)
-3. [模型配置（新增）](#3-模型配置新增)
-4. [会话管理（新增）](#4-会话管理新增)
+3. [认证与用户配置](#3-认证与用户配置)
+4. [会话管理](#4-会话管理)
 5. [知识库](#5-知识库)
 6. [静态文件](#6-静态文件)
 
@@ -107,110 +107,113 @@
 
 ---
 
-## 3. 模型配置（新增）
+## 3. 认证与用户配置
 
-> 运行时动态管理模型池和角色映射，存内存。
+### POST /api/auth/register
 
-### POST /api/config/roles
-
-保存角色→模型映射。
+注册新用户。
 
 **请求体：**
-
 ```json
-{
-  "roles": {
-    "Planner": "DeepSeek Flash",
-    "Coder": "Qwen 7B",
-    "Tester": "DeepSeek Pro"
-  }
-}
+{"name": "alice", "password": "secret123"}
 ```
 
 **响应：**
-
 ```json
-{"status": "ok"}
+{"token": "<jwt>", "user_id": "abc12345", "name": "alice"}
 ```
 
-### GET /api/config/roles
+### POST /api/auth/login
 
-获取当前角色→模型映射。
-
-**响应：**
-
-```json
-{
-  "roles": {
-    "Planner": "DeepSeek Flash",
-    "Coder": "Qwen 7B",
-    "Tester": "DeepSeek Pro"
-  }
-}
-```
-
-### POST /api/config/models
-
-添加自定义模型到模型池。
+登录。
 
 **请求体：**
+```json
+{"name": "alice", "password": "secret123"}
+```
 
+**响应：** 同 register
+
+### GET /api/auth/me
+
+获取当前用户信息（需 Authorization: Bearer \<token\>）。
+
+### GET /api/auth/system-config
+
+获取系统默认模型配置（无需认证）。
+
+**响应：**
 ```json
 {
-  "name": "claude-3-opus",
-  "base_url": "https://api.anthropic.com/v1",
-  "api_key": "sk-ant-..."
+  "default_roles": {"Planner": "a-deepseek", ...},
+  "model_pool": {"a-deepseek": {"model": "deepseek-v4-flash", ...}}
 }
 ```
 
-**响应：**
+### GET /api/user/config
 
-```json
-{"status": "ok"}
-```
+获取当前用户角色配置（需认证）。
 
-### DELETE /api/config/models/{model_name}
+### PUT /api/user/config
 
-从模型池删除指定模型。
+保存当前用户角色配置（需认证）。
 
-**响应：**
+### POST /api/user/custom-models
 
-```json
-{"status": "ok"}
-```
+添加自定义模型（需认证）。
+
+### DELETE /api/user/custom-models/{key}
+
+删除自定义模型（需认证）。
 
 ---
 
-## 4. 会话管理（新增）
+## 4. 会话管理（需认证）
 
-> JSON 文件存储（sessions.json），后续可换数据库。
+> SQLite 持久化 + FTS5 全文索引，按用户隔离。
 
 ### GET /api/sessions
 
-列出所有会话摘要。
+列出当前用户的所有会话摘要。
 
 **响应：**
-
 ```json
 [
   {
     "id": "1719130000000",
     "title": "分析各产品销售额占比",
     "count": 6,
-    "updated": "2026-06-23 15:30"
+    "updated": "2026-06-26 15:30"
   }
 ]
 ```
 
+### GET /api/sessions/search?q=xxx&limit=20&offset=0
+
+**FTS5 全文检索**当前用户的会话消息，按相关度排序。返回带高亮片段的匹配结果。
+
+**响应：**
+```json
+[
+  {
+    "session_id": "1719130000000",
+    "msg_index": 3,
+    "role": "assistant",
+    "snippet": "...用<mark>爬虫</mark>抓取数据..."
+  }
+]
+```
+> 前端用 `session_id` 加载对应会话，`msg_index` 滚动到匹配消息。
+
 ### POST /api/sessions
 
-保存/创建会话。
+保存/创建会话（同步写入 FTS5 索引）。
 
 **请求体：**
-
 ```json
 {
   "id": "1719130000000",
+  "title": "会话标题",
   "messages": [
     {"role": "user", "content": "分析数据"},
     {"role": "assistant", "content": "分析完成..."}
@@ -219,33 +222,17 @@
 ```
 
 **响应：**
-
 ```json
 {"id": "1719130000000", "status": "ok"}
 ```
 
 ### GET /api/sessions/{session_id}
 
-获取单个会话的完整消息。
-
-**响应：**
-
-```json
-{
-  "messages": [...],
-  "updated": "2026-06-23 15:30"
-}
-```
+获取单个会话的完整消息（校验归属）。
 
 ### DELETE /api/sessions/{session_id}
 
-删除指定会话。
-
-**响应：**
-
-```json
-{"status": "ok"}
-```
+删除指定会话（同步清理 FTS5 索引）。
 
 ---
 

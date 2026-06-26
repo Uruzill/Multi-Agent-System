@@ -8,6 +8,7 @@ ChromaDB 知识库封装 —— 建库、检索、文档管理。
 """
 
 import os
+import shutil
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
@@ -16,7 +17,6 @@ from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
-import chromadb
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -64,15 +64,31 @@ def build_index(user_id: str):
 
     docs_dir, persist_dir = _get_user_dirs(user_id)
 
-    # 1. 删除旧 collection（如果存在）
-    client = chromadb.PersistentClient(path=persist_dir)
-    try:
-        client.delete_collection("langchain")
-    except Exception:
-        pass  # 首次构建时 collection 不存在
+    # 1. 先清除该用户的缓存，显式关闭旧连接释放 SQLite 锁
+    old_vs = _vectorstores.pop(user_id, None)
+    if old_vs is not None and hasattr(old_vs, "_client"):
+        try:
+            old_vs._client.close()
+            if hasattr(old_vs._client, "_system"):
+                old_vs._client._system.stop()
+        except Exception:
+            pass
 
-    # 2. 清除该用户的缓存
-    _vectorstores.pop(user_id, None)
+    # 2. 删除旧 collection + 数据文件（直接删文件比用 PersistentClient 更可靠）
+    db_path = os.path.join(persist_dir, "chroma.sqlite3")
+    for _ in range(10):
+        try:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+            break
+        except PermissionError:
+            import time
+            time.sleep(0.3)
+    # 清理 ChromaDB 1.5 的 UUID 子目录（存放向量数据）
+    for item in os.listdir(persist_dir):
+        item_path = os.path.join(persist_dir, item)
+        if os.path.isdir(item_path):
+            shutil.rmtree(item_path, ignore_errors=True)
 
     # 3. 扫描文档
     emb = _get_embeddings()
@@ -95,6 +111,10 @@ def build_index(user_id: str):
         separators=["\n\n", "\n", "。", "！", "？", " ", ""],
     )
     chunks = splitter.split_documents(docs)
+    # 过滤空内容切片（扫描版 PDF 无法提取文字时会生成空 page_content）
+    chunks = [c for c in chunks if c.page_content and c.page_content.strip()]
+    if not chunks:
+        return 0
 
     # 5. 创建新 collection
     Chroma.from_documents(

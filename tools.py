@@ -4,7 +4,7 @@
 """
 
 import os
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+os.environ["HF_ENDPOINT"] = os.getenv("HF_ENDPOINT", "https://hf-mirror.com")
 
 from langchain.tools import tool
 
@@ -162,10 +162,19 @@ def visualize_data(path: str, chart_type: str = "bar", save_as: str = "chart.png
     except ImportError:
         return "[错误] Pillow 未安装，请执行 pip install Pillow"
 
-    _FONT_PATHS = [
+    _FONT_PATHS = os.environ.get("FONT_PATH", "").split(os.pathsep) if os.environ.get("FONT_PATH") else [
+        # Windows
         "C:/Windows/Fonts/msyh.ttc",
         "C:/Windows/Fonts/simhei.ttf",
         "C:/Windows/Fonts/simsun.ttc",
+        # macOS
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/Library/Fonts/Arial Unicode.ttf",
+        # Linux
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     ]
     _cjk_font = None
     _title_font = None
