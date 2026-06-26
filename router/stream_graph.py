@@ -21,6 +21,7 @@ from router.stream_state import SessionState, push
 
 logger = logging.getLogger(__name__)
 
+
 # ── LangGraph 状态定义 ──
 class StreamWorkflowState(TypedDict):
     session: SessionState
@@ -84,7 +85,7 @@ def _stream_llm(role: str, prompt: str, session: SessionState, temperature: floa
         content += text
         push(session, {"type": "token", "name": role, "content": text})
     push(session, {"type": "agent_end", "name": role, "content": content})
-    logger.info("stream | agent_end=%s | chars=%d", role, len(content))
+    logger.info("stream | agent_end=%s | chars=%d, content=%s", role, len(content), content)
     return content
 
 
@@ -113,8 +114,9 @@ def retriever_node(state: StreamWorkflowState) -> dict:
     session = state["session"]
     push(session, {"type": "agent_start", "name": "Retriever"})
     kb_result = search_knowledge.invoke(state["user_input"])
-    
+
     prompt = (
+        f"{SYSTEM_PROMPTS['Retriever']}\n\n"
         f"任务：{state['user_input']}\n任务类型：{state.get('task_type', '')}\n计划：{state.get('plan', '')}\n"
         f"知识库检索结果：{kb_result}\n\n请总结与任务最相关的信息。"
     )
@@ -180,14 +182,14 @@ def executor_node(state: StreamWorkflowState) -> dict:
     session = state["session"]
     code_or_draft = state.get("code_or_draft", "")
     code_blocks = re.findall(r"```(?:python)?\s*\n(.*?)```", code_or_draft, re.DOTALL)
-    
+
     if not code_blocks:
         return {"execution_result": "（无有效代码块执行）"}
-        
+
     push(session, {"type": "agent_start", "name": "Executor"})
     executor = CodeExecutor()
     all_results = []
-    
+
     for i, code in enumerate(code_blocks):
         code = code.strip()
         if len(code) < 10:
@@ -201,7 +203,7 @@ def executor_node(state: StreamWorkflowState) -> dict:
         )
         all_results.append(text)
         push(session, {"type": "token", "name": "Executor", "content": text + "\n\n"})
-        
+
     execution_result = "\n\n".join(all_results) if all_results else "（无有效代码块执行）"
     push(session, {"type": "agent_end", "name": "Executor", "content": execution_result})
     return {"execution_result": execution_result, "thinking": [{"name": "Executor", "content": execution_result}]}
@@ -212,22 +214,19 @@ def tester_node(state: StreamWorkflowState) -> dict:
     task_type = state.get("task_type", "编程")
     code_or_draft = state.get("code_or_draft", "")
     execution_result = state.get("execution_result", "")
-    
-    prompt = (
-        f"用户原始需求：{state['user_input']}\n\n任务类型：{task_type}\n"
-        f"产出内容：\n{code_or_draft[:3000]}\n"
-    )
+
+    prompt = f"用户原始需求：{state['user_input']}\n\n任务类型：{task_type}\n产出内容：\n{code_or_draft[:3000]}\n"
     if "无代码" not in execution_result:
         prompt += f"执行结果：\n{execution_result}\n\n"
     prompt += "请评审上述产出是否满足用户原始需求。"
-    
+
     session_prompt = f"{SYSTEM_PROMPTS['Tester']}\n\n{prompt}"
     content = _stream_llm("Tester", session_prompt, session, temperature=0.2)
-    
+
     new_fix_count = state.get("fix_count", 0)
     if "❌" in content:
         new_fix_count += 1
-        
+
     return {"test_result": content, "fix_count": new_fix_count, "thinking": [{"name": "Tester", "content": content}]}
 
 
@@ -263,13 +262,13 @@ def build_stream_workflow() -> StateGraph:
 
     wf.add_edge("planner", "retriever")
     wf.add_conditional_edges("retriever", _route_task)
-    
+
     wf.add_edge("coder", "executor")
     wf.add_conditional_edges("executor", _route_after_executor)
-    
+
     wf.add_edge("writer", "tester")
     wf.add_conditional_edges("tester", _route_test)
-    
+
     wf.add_edge("summarizer", END)
 
     return wf.compile()

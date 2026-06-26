@@ -18,7 +18,7 @@ from router.stream import run_workflow_streaming
 
 async def run_test():
     print("====== 1. 模拟 /chat/start 启动工作流 ======")
-    user_input = "写一个 Python 函数计算列表中所有偶数的平方和，并给出一个 [1, 2, 3, 4, 5] 的测试例子"
+    user_input = "以毛泽东词句风雷动，旌旗奋，是人寰为核心立意，撰写一篇 200 字议论文，"
     print(f"用户输入: {user_input}\n")
 
     # 构造并初始化 session
