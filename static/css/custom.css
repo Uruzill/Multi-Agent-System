@@ -869,3 +869,209 @@ body {
 .loading-bubble {
     color: var(--text-secondary);
 }
+
+/* ===== 模式快捷切换（输入框内部左下角） ===== */
+.mode-bar {
+    position: absolute;
+    left: 14px;
+    bottom: 14px;
+    display: flex;
+    gap: 3px;
+    z-index: 5;
+    pointer-events: none;
+}
+.mode-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 12px;
+    border-radius: 9999px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: #9ca3af;
+    background: transparent;
+    border: 1px solid transparent;
+    cursor: pointer;
+    user-select: none;
+    line-height: 1.5;
+    transition: color 0.25s, background 0.25s, border-color 0.25s;
+    pointer-events: auto;
+}
+.mode-chip:hover {
+    color: #6b7280;
+    background: #f3f4f6;
+}
+.mode-chip.active {
+    color: #ffffff;
+    border-color: var(--brand-primary);
+    background: var(--brand-primary);
+    animation: mode-switch 0.35s ease-out;
+}
+@keyframes mode-switch {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.12); box-shadow: 0 0 12px rgba(79,140,255,0.4); }
+    100% { transform: scale(1); box-shadow: none; }
+}
+#chat-layout.welcome-active .mode-bar {
+    display: none;
+}
+
+/* ===== 用户消息工具栏 ===== */
+.user-msg-toolbar {
+    display: flex;
+    gap: 4px;
+    justify-content: flex-end;
+    margin-top: 4px;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+.message-user:hover .user-msg-toolbar {
+    opacity: 1;
+}
+
+/* ===== 内联编辑器（修改消息） ===== */
+.inline-editor {
+    width: 100%;
+    max-width: 66%;
+    background: #ffffff;
+    border: 1px solid #e0e4e8;
+    border-radius: 20px;
+    padding: 12px 14px 10px;
+    box-sizing: border-box;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.inline-editor:focus-within {
+    border-color: var(--brand-primary);
+    box-shadow: 0 0 0 3px rgba(79,140,255,0.10);
+}
+.inline-input {
+    width: 100%;
+    border: none;
+    outline: none;
+    resize: none;
+    font-family: inherit;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--text-primary);
+    background: transparent;
+    min-height: 44px;
+    max-height: 120px;
+    padding: 4px 0;
+    box-sizing: border-box;
+}
+.inline-input::placeholder {
+    color: #b0b8c1;
+}
+.inline-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    padding: 6px 2px 0;
+    border-top: 1px solid #f0f2f5;
+    margin-top: 4px;
+}
+.inline-cancel {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-family: inherit;
+    cursor: pointer;
+    padding: 5px 14px;
+    border-radius: 8px;
+    transition: background 0.12s, color 0.12s;
+    user-select: none;
+}
+.inline-cancel:hover {
+    background: #f3f4f6;
+    color: var(--text-primary);
+}
+.inline-send {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: none;
+    background: var(--brand-primary);
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.15s, transform 0.15s;
+}
+.inline-send:hover {
+    background: #3d7ae8;
+    transform: scale(1.05);
+}
+.inline-send:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* ===== 文件标签 ===== */
+.file-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 0 4px 6px;
+    max-width: 900px;
+    margin: 0 auto;
+}
+.file-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #f0f2f5;
+    border-radius: 8px;
+    padding: 4px 12px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+.file-tag .ft-name {
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+}
+.file-tag .ft-status {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+}
+.file-tag.ft-error {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+/* ===== 报告内容 ===== */
+.report-content {
+    margin-top: 12px;
+    padding: 16px 20px;
+    border: 1px solid #e0e4e8;
+    border-radius: 12px;
+    background: #ffffff;
+    font-size: 0.88rem;
+    line-height: 1.7;
+}
+.report-header {
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+}
+
+/* ===== AI 生成提示 ===== */
+.ai-disclaimer {
+    display: none;
+    text-align: center;
+    font-size: 0.72rem;
+    color: #b0b8c1;
+    padding: 4px 0 2px;
+    user-select: none;
+}
+.ai-disclaimer.show {
+    display: block;
+}

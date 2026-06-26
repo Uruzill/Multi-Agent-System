@@ -15,6 +15,9 @@ const COLORS = {
 
 let messageHistory = [];
 let _currentSessionId = null;
+let pendingFiles = [];
+let _streamSessionId = null;
+let _streamReader = null;
 let _streamSessionId = null;   // 当前活跃的流式会话 ID，用于中断
 let _streamReader = null;      // 当前活跃的 ReadableStream reader，用于中断
 
@@ -32,6 +35,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     setupLaneMode();
     setupChatForm();
     setupKnowledgeUI();
+    setupFileUpload();
+    setupDragUpload();
+    var auto = document.querySelector('.welcome-mode[data-value="auto"]');
+    if (auto) auto.classList.add('active');
+    var layout = document.getElementById('chat-layout');
+    if (layout) layout.classList.add('welcome-active');
     if (typeof loadSessionHistory === 'function') {
         loadSessionHistory();
     }
@@ -41,26 +50,17 @@ document.addEventListener("DOMContentLoaded", async () => {
 function setupLaneMode() {
     const updateStatus = () => {
         const mode = document.querySelector("input[name='lane_mode']:checked")?.value;
-        const el = document.getElementById("lane-status");
-        if (el) {
-            if (mode === "fast") {
-                el.innerHTML = '<span class="text-primary fw-bold">快速（直接回复）</span>';
-            } else if (mode === "slow") {
-                el.innerHTML = '<span class="text-success fw-bold">协作（多Agent协作）</span>';
-            } else {
-                el.innerHTML = '<span class="text-info fw-bold">自动（AI 判断）</span>';
-            }
+        if (!mode) return;
+        document.querySelectorAll('.lane-option, .mode-chip, .welcome-mode').forEach(function(el) {
+            el.classList.toggle('active', el.getAttribute('data-value') === mode);
+        });
+        var label = document.getElementById('welcome-mode-label');
+        if (label) {
+            var names = { auto: '自动', fast: '快速', slow: '协作' };
+            label.innerHTML = '使用 <strong>' + (names[mode] || mode) + '</strong> 模式进行对话';
         }
-        // 更新胶囊按钮 active 状态
-        document.querySelectorAll('.mode-toggle-item').forEach(l => {
-            l.classList.toggle('active', l.getAttribute('data-value') === mode);
-        });
-        // 更新悬浮弹窗 active 状态
-        document.querySelectorAll('.lane-option').forEach(o => {
-            o.classList.toggle('active', o.getAttribute('data-value') === mode);
-        });
     };
-    document.querySelectorAll("input[name='lane_mode']").forEach(r => {
+    document.querySelectorAll("input[name='lane_mode']").forEach(function(r) {
         r.addEventListener('change', updateStatus);
     });
     updateStatus();
@@ -174,7 +174,7 @@ async function sendMessage(message) {
     var welcome = document.querySelector('.chat-welcome');
     if (welcome) welcome.remove();
 
-    appendUserMessage(message);
+    appendUserMessage(message, laneMode);
 
     const loadingId = appendLoadingMessage();
 
@@ -190,6 +190,7 @@ async function sendMessage(message) {
                 message: message,
                 lane_mode: laneMode,
                 history: messageHistory,
+                file_ids: pendingFiles.length > 0 ? pendingFiles.slice() : undefined,
             }),
         });
         if (!startResp.ok) {
@@ -198,6 +199,7 @@ async function sendMessage(message) {
         }
         const { session_id } = await startResp.json();
         _streamSessionId = session_id;
+        clearFileTags();
 
         // 2. 移除骨架屏，创建实时助手消息容器
         removeLoadingMessage(loadingId);
@@ -249,6 +251,8 @@ async function sendMessage(message) {
         // 4. 流结束
         _streamReader = null;
         _streamSessionId = null;
+        var disclaimer = document.getElementById('ai-disclaimer');
+        if (disclaimer && !disclaimer.classList.contains('show')) disclaimer.classList.add('show');
         messageHistory.push({ role: "user", content: message });
         saveCurrentSession();
 
@@ -287,13 +291,141 @@ function regenerate() {
 }
 
 // ===== 消息渲染 =====
-function appendUserMessage(message) {
+function appendUserMessage(message, laneMode) {
     const container = document.getElementById("chat-messages");
     const div = document.createElement("div");
     div.className = "message-user";
-    div.innerHTML = `<div class="bubble">${escapeHtml(message)}</div>`;
+    div.dataset.msgIdx = messageHistory.length;
+    div.dataset.lane = laneMode || 'auto';
+    div.innerHTML = '\
+        <div class="bubble">' + escapeHtml(message) + '</div>\
+        <div class="user-msg-toolbar">\
+            <button class="toolbar-btn" onclick="copyUserMsg(this)" title="复制">复制</button>\
+            <button class="toolbar-btn" onclick="editUserMsg(this)" title="修改">修改</button>\
+        </div>';
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;
+}
+
+function copyUserMsg(btn) {
+    var bubble = btn.closest('.message-user').querySelector('.bubble');
+    navigator.clipboard.writeText(bubble.textContent).then(function() {
+        var orig = btn.textContent;
+        btn.textContent = '已复制';
+        setTimeout(function() { btn.textContent = orig; }, 2000);
+    }).catch(function() {
+        btn.textContent = '复制失败';
+    });
+}
+
+function editUserMsg(btn) {
+    var msgDiv = btn.closest('.message-user');
+    var bubble = msgDiv.querySelector('.bubble');
+    var oldContent = bubble ? bubble.textContent : '';
+    msgDiv.innerHTML = '\
+        <div class="inline-editor">\
+            <textarea class="inline-input" rows="2" placeholder="编辑消息...">' + escapeHtml(oldContent) + '</textarea>\
+            <div class="inline-actions">\
+                <button class="inline-cancel" onclick="cancelEdit(this)">取消</button>\
+                <button class="inline-send" onclick="submitEdit(this)" title="确定 (Enter)">\
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 11 7-7 7 7M12 4v16"/></svg>\
+                </button>\
+            </div>\
+        </div>';
+    var ta = msgDiv.querySelector('.inline-input');
+    ta.focus();
+    ta.addEventListener('input', function() { this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 120) + 'px'; });
+    ta.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); var sb = ta.closest('.inline-editor').querySelector('.inline-send'); if (sb && !sb.disabled) submitEdit(sb); }
+        else if (e.key === 'Escape') { e.preventDefault(); var cb = ta.closest('.inline-editor').querySelector('.inline-cancel'); if (cb) cancelEdit(cb); }
+    });
+}
+
+function cancelEdit(btn) {
+    var msgDiv = btn.closest('.message-user');
+    var idx = parseInt(msgDiv.dataset.msgIdx);
+    var original = messageHistory[idx] ? messageHistory[idx].content : '';
+    msgDiv.innerHTML = '\
+        <div class="bubble">' + escapeHtml(original) + '</div>\
+        <div class="user-msg-toolbar">\
+            <button class="toolbar-btn" onclick="copyUserMsg(this)" title="复制">复制</button>\
+            <button class="toolbar-btn" onclick="editUserMsg(this)" title="修改">修改</button>\
+        </div>';
+}
+
+async function submitEdit(btn) {
+    var editor = btn.closest('.inline-editor');
+    var textarea = editor.querySelector('.inline-input');
+    var message = textarea.value.trim();
+    if (!message) return;
+    var msgDiv = btn.closest('.message-user');
+    var idx = parseInt(msgDiv.dataset.msgIdx);
+    btn.disabled = true;
+    var laneMode = msgDiv.dataset.lane || 'auto';
+
+    // 同步模式到主输入区
+    var radio = document.getElementById('lane-' + laneMode);
+    if (radio) radio.checked = true;
+    var target = document.querySelector('.lane-option[data-value="' + laneMode + '"]');
+    if (target && typeof selectLane === 'function') selectLane(target);
+
+    // 立即清理旧消息，显示新消息 + 加载动画
+    messageHistory.splice(idx);
+    var next = msgDiv.nextElementSibling;
+    while (next) { var toRemove = next; next = next.nextElementSibling; toRemove.remove(); }
+    msgDiv.innerHTML = '\
+        <div class="bubble">' + escapeHtml(message) + '</div>\
+        <div class="user-msg-toolbar">\
+            <button class="toolbar-btn" onclick="copyUserMsg(this)" title="复制">复制</button>\
+            <button class="toolbar-btn" onclick="editUserMsg(this)" title="修改">修改</button>\
+        </div>';
+    msgDiv.dataset.lane = laneMode;
+    var loadingId = appendLoadingMessage();
+
+    try {
+        var resp = await fetch('/api/chat/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: message, lane_mode: laneMode, history: messageHistory }),
+        });
+        if (!resp.ok) throw new Error('启动失败');
+        var { session_id } = await resp.json();
+        var streamResp = await fetch('/api/chat/stream/' + session_id, { signal: new AbortController().signal });
+        var reader = streamResp.body.getReader();
+        var decoder = new TextDecoder();
+        var buf = '';
+        while (true) {
+            var { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            var parts2 = buf.split('\n\n');
+            buf = parts2.pop() || '';
+            for (var p of parts2) {
+                for (var line of p.split('\n')) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            var ev = JSON.parse(line.slice(6));
+                            if (ev.type === 'done') {
+                                removeLoadingMessage(loadingId);
+                                var bubble = msgDiv.querySelector('.bubble');
+                                if (bubble) bubble.innerHTML = markdownToHtml(ev.reply || '');
+                                messageHistory.push({ role: 'assistant', content: ev.reply || '' });
+                                saveCurrentSession();
+                            } else if (ev.type === 'error') {
+                                removeLoadingMessage(loadingId);
+                                appendErrorMessage(ev.content || '错误');
+                            }
+                        } catch(e) {}
+                    }
+                }
+            }
+        }
+        removeLoadingMessage(loadingId);
+    } catch (err) {
+        removeLoadingMessage(loadingId);
+        if (err.name === 'AbortError') return;
+        appendErrorMessage(err.message);
+    }
 }
 
 function appendAssistantMessage(data) {
@@ -544,6 +676,71 @@ function removeLoadingMessage(id) {
     if (el) el.remove();
 }
 
+// ===== 文件上传 =====
+function setupFileUpload() {
+    var btn = document.getElementById('attach-btn');
+    var input = document.getElementById('file-input');
+    if (!btn || !input) return;
+    btn.addEventListener('click', function() { input.click(); });
+    input.addEventListener('change', async function() {
+        var files = Array.from(this.files);
+        if (!files.length) return;
+        this.value = '';
+        for (var f of files) {
+            await uploadFile(f);
+        }
+    });
+}
+async function uploadFile(file) {
+    var tagId = 'ft-' + Date.now();
+    addFileTag(tagId, file.name, '上传中...');
+    var formData = new FormData();
+    formData.append('file', file);
+    try {
+        var resp = await fetch('/api/upload', { method: 'POST', body: formData });
+        if (!resp.ok) {
+            var err = await resp.json().catch(function() { return { error: '上传失败' }; });
+            updateFileTag(tagId, file.name, '❌ ' + (err.error || '失败'), true);
+            return;
+        }
+        var data = await resp.json();
+        updateFileTag(tagId, file.name, '✅ ' + file.name, false);
+        pendingFiles.push(data.file_id);
+    } catch (e) {
+        updateFileTag(tagId, file.name, '❌ 网络错误', true);
+    }
+}
+function addFileTag(id, name, status) {
+    var el = document.getElementById('file-tags');
+    if (!el) return;
+    var tag = document.createElement('span');
+    tag.id = id;
+    tag.className = 'file-tag';
+    tag.innerHTML = '<span class="ft-name">' + escapeHtml(name) + '</span> <span class="ft-status">' + escapeHtml(status) + '</span>';
+    el.appendChild(tag);
+}
+function updateFileTag(id, name, status, isError) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = '<span class="ft-name">' + escapeHtml(name) + '</span> <span class="ft-status">' + escapeHtml(status) + '</span>';
+    if (isError) { el.classList.add('ft-error'); setTimeout(function() { el.remove(); }, 4000); }
+}
+function clearFileTags() {
+    pendingFiles = [];
+    var el = document.getElementById('file-tags');
+    if (el) el.innerHTML = '';
+}
+function setupDragUpload() {
+    var zone = document.getElementById('drop-zone');
+    var overlay = document.getElementById('drag-overlay');
+    if (!zone || !overlay) return;
+    var dragCount = 0;
+    zone.addEventListener('dragenter', function(e) { e.preventDefault(); e.stopPropagation(); dragCount++; overlay.classList.add('show'); });
+    zone.addEventListener('dragover', function(e) { e.preventDefault(); e.stopPropagation(); });
+    zone.addEventListener('dragleave', function(e) { e.preventDefault(); e.stopPropagation(); dragCount--; if (dragCount <= 0) { dragCount = 0; overlay.classList.remove('show'); } });
+    zone.addEventListener('drop', function(e) { e.preventDefault(); e.stopPropagation(); dragCount = 0; overlay.classList.remove('show'); var files = Array.from(e.dataTransfer.files); if (!files.length) return; for (var f of files) { uploadFile(f); } });
+}
+
 // ===== 知识库 UI =====
 async function loadKnowledgeStats() {
     try {
@@ -620,25 +817,39 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function escapeAttr(str) {
+    return str.replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function copyReply(btn) {
+    var text = btn.getAttribute('data-text');
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(function() {
+        var orig = btn.textContent;
+        btn.textContent = '✅ 已复制';
+        setTimeout(function() { btn.textContent = orig; }, 2000);
+    }).catch(function() {
+        btn.textContent = '复制失败';
+    });
+}
+
 // ===== Markdown → HTML（代码块带复制按钮 + 语言标签） =====
 function markdownToHtml(md) {
-    let html = escapeHtml(md);
-    // 代码块（带语言标签 + 复制按钮）
-    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(match, lang, code) {
-        var id = 'cb-' + Math.random().toString(36).slice(2, 8);
-        var label = lang || 'code';
-        return '<div class="code-block" id="' + id + '">' +
-            '<div class="code-lang">' + label + '</div>' +
-            '<button class="code-copy" onclick="var p=document.getElementById(\'' + id + '\');var t=p.querySelector(\'code\').textContent;navigator.clipboard.writeText(t).then(function(){var b=p.querySelector(\'.code-copy\');b.textContent=\'已复制\';setTimeout(function(){b.textContent=\'复制\'},2000)})">复制</button>' +
-            '<pre><code>' + code.trim() + '</code></pre>' +
-            '</div>';
-    });
-    html = html.replace(/^### (.+)$/gm, "<h6>$1</h6>");
-    html = html.replace(/^## (.+)$/gm, "<h5>$1</h5>");
-    html = html.replace(/^# (.+)$/gm, "<h4>$1</h4>");
-    html = html.replace(/^- (.+)$/gm, "<li>$1</li>");
-    html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-    return html;
+    if (!md) return '';
+    if (typeof marked !== 'undefined' && marked.parse) {
+        var renderer = new marked.Renderer();
+        renderer.code = function(_a) {
+            var text = _a.text, lang = _a.lang;
+            var id = 'cb-' + Math.random().toString(36).slice(2, 8);
+            var label = lang || 'code';
+            var esced = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            var escapedLabel = label.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            return '<div class="code-block" id="' + id + '"><div class="code-lang">' + escapedLabel + '</div><button class="code-copy" onclick="var p=document.getElementById(\'' + id + '\');var t=p.querySelector(\'code\').textContent;navigator.clipboard.writeText(t).then(function(){var b=p.querySelector(\'.code-copy\');b.textContent=\'已复制\';setTimeout(function(){b.textContent=\'复制\'},2000)})">复制</button><pre><code>' + esced + '</code></pre></div>';
+        };
+        marked.setOptions({ renderer: renderer, gfm: true, breaks: true });
+        return marked.parse(md);
+    }
+    return escapeHtml(md).replace(/\n/g, '<br>');
 }
 
 // ===== 会话保存（适配 db.py 后端） =====

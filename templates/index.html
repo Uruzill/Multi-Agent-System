@@ -39,7 +39,13 @@
             <button type="submit" class="send-btn" title="发送 (Enter)">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 11 7-7 7 7M12 4v16"/></svg>
             </button>
+            <div class="mode-bar">
+                <span class="mode-chip active" data-value="auto" onclick="selectLane(this)">自动</span>
+                <span class="mode-chip" data-value="fast" onclick="selectLane(this)">快速</span>
+                <span class="mode-chip" data-value="slow" onclick="selectLane(this)">协作</span>
+            </div>
         </form>
+        <div id="ai-disclaimer" class="ai-disclaimer">内容由 AI 生成，请仔细甄别</div>
     </div>
     <script>
     // 输入框自动扩展
